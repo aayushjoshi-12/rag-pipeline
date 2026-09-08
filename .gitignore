@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+*.db
+
+# Virtual environments
+.venv
+
+# Secrets
+.env
+.env.deploy
+.env.deploy.*
+.deploys.log
+
+# Runtime data (raw uploads, vector store, jobs) — never commit document content
+data/
+tmp/
+
+# Node / frontend
+node_modules/
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+coverage.xml

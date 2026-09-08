@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chroma
+  namespace: rag-pipeline
+  labels:
+    app.kubernetes.io/name: rag-pipeline
+    app.kubernetes.io/component: chroma
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: chroma
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: chroma
+    spec:
+      containers:
+        - name: chroma
+          image: chromadb/chroma:latest
+          ports:
+            - containerPort: 8000
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /chroma/chroma
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: rag-pipeline-chroma-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: chroma
+  namespace: rag-pipeline
+spec:
+  selector:
+    app.kubernetes.io/component: chroma
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rag-pipeline-chroma-data
+  namespace: rag-pipeline
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi

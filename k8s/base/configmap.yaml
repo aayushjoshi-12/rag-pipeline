@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rag-pipeline-config
+  namespace: rag-pipeline
+data:
+  RAG_ENV: "prod"
+  PORT: "8000"
+  LOG_LEVEL: "INFO"
+  VECTOR_STORE: "chroma"
+  CHROMA_HOST: "chroma"
+  CHROMA_PORT: "8000"
+  REDIS_URL: "redis://redis:6379/0"
+  CELERY_BROKER_URL: "redis://redis:6379/0"
+  CELERY_RESULT_BACKEND: "redis://redis:6379/1"
+  CHUNK_SIZE: "512"
+  CHUNK_OVERLAP: "64"
+  DEFAULT_TOP_K: "5"
+  MAX_UPLOAD_SIZE_BYTES: "26214400"
+  EMBEDDING_PROVIDER: "ollama"
+  EMBEDDING_MODEL: "mxbai-embed-large"
+  OLLAMA_BASE_URL: "http://ollama:11434"
+  LLM_PROVIDER: "openrouter"
+  DEFAULT_LLM_MODEL: "nvidia/nemotron-3-super-120b-a12b:free"
+  PARSER_PROVIDER: "openrouter"
+  PARSER_LLM_MODEL: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
