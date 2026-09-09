@@ -208,8 +208,10 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate(self) -> Settings:
-        # Structural validation only — do not hard-fail on a missing LLM key here so
-        # the foundation (health, db, celery) can boot without chat configured.
         if self.llm_provider not in ("openrouter", "openai", "anthropic"):
             raise SettingsError(f"Unknown LLM provider '{self.llm_provider}'.")
+        if self.embedding_provider not in ("ollama", "openai"):
+            raise SettingsError(f"Unknown embedding provider '{self.embedding_provider}'.")
+        if self.vector_store not in ("chroma",):
+            raise SettingsError(f"Unknown vector store '{self.vector_store}'.")
         return self
