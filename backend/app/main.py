@@ -10,7 +10,7 @@ from sqlalchemy import text
 from app.config import Settings
 from app.db.engine import engine
 from app.observability import configure_for_server
-from app.routers import documents, health
+from app.routers import chat, documents, health
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -33,3 +33,4 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="rag-pipeline", version="0.1.0", lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(documents.router)
+app.include_router(chat.router)

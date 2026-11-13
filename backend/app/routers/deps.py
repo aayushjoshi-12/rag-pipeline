@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db.engine import async_session
+from app.services.embeddings import Embedder, get_embedder
+from app.services.llm import LLM, LLMConfigError, get_llm
 from app.services.vectorstore import VectorStore, get_vector_store
 
 #: Enqueues an ingest job and returns the broker task id.
@@ -36,3 +38,15 @@ def get_enqueue() -> Enqueue:
 
 def get_store() -> VectorStore:
     return get_vector_store()
+
+
+def get_embedder_dep() -> Embedder:
+    return get_embedder()
+
+
+def get_llm_dep() -> LLM | None:
+    """The configured LLM, or ``None`` when its key is missing (the route 503s only if needed)."""
+    try:
+        return get_llm(get_settings())
+    except LLMConfigError:
+        return None
