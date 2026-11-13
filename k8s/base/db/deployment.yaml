@@ -25,7 +25,10 @@ spec:
             - name: POSTGRES_USER
               value: rag
             - name: POSTGRES_PASSWORD
-              value: rag
+              valueFrom:
+                secretKeyRef:
+                  name: rag-pipeline-secrets
+                  key: POSTGRES_PASSWORD
             - name: POSTGRES_DB
               value: rag
           volumeMounts:

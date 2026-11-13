@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-pipeline-frontend
+  namespace: rag-pipeline
+  labels:
+    app.kubernetes.io/name: rag-pipeline
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: frontend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: rag-pipeline/frontend:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: API_UPSTREAM
+              value: http://rag-pipeline-api
+          ports:
+            - containerPort: 80
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rag-pipeline-frontend
+  namespace: rag-pipeline
+spec:
+  selector:
+    app.kubernetes.io/component: frontend
+  ports:
+    - port: 80
+      targetPort: 80

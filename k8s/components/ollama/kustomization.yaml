@@ -1,0 +1,6 @@
+# Optional: in-cluster Ollama for embeddings. Add under `components:` in an overlay.
+# Without it, point OLLAMA_BASE_URL at an external Ollama or switch EMBEDDING_PROVIDER to openai.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+resources:
+  - ollama.yaml

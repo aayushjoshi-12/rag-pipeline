@@ -23,6 +23,9 @@ dependencies = [
     "anthropic>=0.40",
     "pymupdf>=1.24",
     "docling>=2.3",
+    # Direct (already transitive via docling) so tool.uv.sources can pick CPU wheels on Linux.
+    "torch>=2.0",
+    "torchvision>=0.15",
     "pytesseract>=0.3.13",
     "Pillow>=11.0",
     "tenacity>=9.0",
@@ -72,3 +75,14 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+# docling pulls in torch; the default Linux wheel bundles ~GBs of CUDA libraries that a CPU-only
+# deployment never uses. macOS keeps the regular PyPI wheels.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

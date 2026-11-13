@@ -4,37 +4,34 @@ kind: Kustomization
 resources:
   - ../../base
   - hpa.yaml
+  - ingress.yaml
+
+# Pin real tags/digests here (never :latest in prod).
+images:
+  - name: rag-pipeline/backend
+    newTag: latest
+  - name: rag-pipeline/frontend
+    newTag: latest
 
 patches:
-  - patch: |-
+  - target: {kind: Deployment, name: rag-pipeline-api}
+    patch: |-
       - op: replace
         path: /spec/replicas
         value: 3
-    target:
-      kind: Deployment
-      name: rag-pipeline-api
-  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits
+        value: {cpu: "2", memory: 2Gi}
+  - target: {kind: Deployment, name: rag-pipeline-worker}
+    patch: |-
       - op: replace
         path: /spec/replicas
         value: 3
-    target:
-      kind: Deployment
-      name: rag-pipeline-worker
-  - patch: |-
       - op: replace
         path: /spec/template/spec/containers/0/resources/limits
-        value:
-          cpu: "2"
-          memory: 2Gi
-    target:
-      kind: Deployment
-      name: rag-pipeline-api
-  - patch: |-
+        value: {cpu: "2", memory: 4Gi}
+  - target: {kind: Deployment, name: rag-pipeline-frontend}
+    patch: |-
       - op: replace
-        path: /spec/template/spec/containers/0/resources/limits
-        value:
-          cpu: "2"
-          memory: 2Gi
-    target:
-      kind: Deployment
-      name: rag-pipeline-worker
+        path: /spec/replicas
+        value: 2

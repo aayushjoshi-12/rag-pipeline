@@ -1,3 +1,26 @@
+x-backend-env: &backend-env
+  # `.env` holds localhost URLs for host-run development; inside containers the services are
+  # reached by their Compose hostnames. These override env_file values.
+  DATABASE_URL: postgresql+asyncpg://rag:rag@db:5432/rag
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  CHROMA_HOST: chroma
+  CHROMA_PORT: "8000"
+  # Ollama runs on the host (see README); host.docker.internal reaches it from the containers.
+  OLLAMA_BASE_URL: ${OLLAMA_DOCKER_URL:-http://host.docker.internal:11434}
+  DATA_DIR: /app/data
+
+x-backend: &backend
+  build:
+    context: ./backend
+  env_file: .env
+  environment: *backend-env
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  volumes:
+    - appdata:/app/data
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -35,16 +58,23 @@ services:
     volumes:
       - chroma-data:/chroma/chroma
 
-  api:
-    build:
-      context: ./backend
-    container_name: rag-pipeline-api
-    env_file: .env
-    ports:
-      - "8000:8000"
+  migrate:
+    <<: *backend
+    container_name: rag-pipeline-migrate
+    command: alembic upgrade head
     depends_on:
       db:
         condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend
+    container_name: rag-pipeline-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       chroma:
@@ -58,18 +88,25 @@ services:
     restart: unless-stopped
 
   worker:
-    build:
-      context: ./backend
+    <<: *backend
     container_name: rag-pipeline-worker
     command: celery -A app.celery_app worker --loglevel=INFO
-    env_file: .env
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       chroma:
         condition: service_started
+    restart: unless-stopped
+
+  beat:
+    <<: *backend
+    container_name: rag-pipeline-beat
+    command: celery -A app.celery_app beat --loglevel=INFO -s /tmp/celerybeat-schedule
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   frontend:
@@ -86,5 +123,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  appdata:
   pgdata:
   chroma-data:

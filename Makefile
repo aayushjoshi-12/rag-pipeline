@@ -5,7 +5,7 @@
         run run-backend run-frontend \
         db-up db-down migrate \
         up down logs \
-        deploy deploy-dry
+        deploy deploy-dry images
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
@@ -93,9 +93,9 @@ migrate:
 
 # ── Docker (full stack) ───────────────────────────────────────────────────────
 
+# The compose `migrate` service runs alembic before api/worker start.
 up:
 	docker compose up -d --build
-	$(MAKE) migrate
 
 down:
 	docker compose down
@@ -109,9 +109,19 @@ logs:
 # cluster can pull from.
 
 ENV ?= dev
+REGISTRY ?= rag-pipeline
+TAG ?= latest
 
+# Build both images for linux/amd64 (required when building on Apple Silicon for an x86 cluster).
+images:
+	docker build --platform linux/amd64 -t $(REGISTRY)/backend:$(TAG) backend
+	docker build --platform linux/amd64 -f frontend/Dockerfile.prod -t $(REGISTRY)/frontend:$(TAG) frontend
+
+# Jobs are immutable, so the previous migrate Job is removed before re-applying; then wait for it.
 deploy:
+	kubectl delete job rag-pipeline-migrate -n rag-pipeline --ignore-not-found
 	kubectl apply -k k8s/overlays/$(ENV)
+	kubectl wait --for=condition=complete job/rag-pipeline-migrate -n rag-pipeline --timeout=300s
 
 deploy-dry:
 	kubectl kustomize k8s/overlays/$(ENV)

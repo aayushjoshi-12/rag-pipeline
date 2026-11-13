@@ -1,0 +1,14 @@
+# Production image: static build served by nginx, /api proxied to the backend service.
+FROM node:22-slim AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM nginx:1.27-alpine
+# API_UPSTREAM is substituted into the template at container start (nginx image feature).
+ENV API_UPSTREAM=http://rag-pipeline-api:8000
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY --from=build /app/dist /usr/share/nginx/html
+EXPOSE 80

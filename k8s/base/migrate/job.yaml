@@ -1,0 +1,46 @@
+# Run before (re)deploying the api/worker: `kubectl delete job rag-pipeline-migrate --ignore-not-found`
+# then apply (Jobs are immutable). `make deploy` does both and waits for completion.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: rag-pipeline-migrate
+  namespace: rag-pipeline
+  labels:
+    app.kubernetes.io/name: rag-pipeline
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: migrate
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: rag-pipeline/backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: rag-pipeline-config
+            - secretRef:
+                name: rag-pipeline-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

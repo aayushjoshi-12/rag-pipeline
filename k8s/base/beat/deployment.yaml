@@ -1,0 +1,48 @@
+# Exactly one beat: two would double-fire every scheduled task. Recreate avoids overlap on rollout.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rag-pipeline-beat
+  namespace: rag-pipeline
+  labels:
+    app.kubernetes.io/name: rag-pipeline
+    app.kubernetes.io/component: beat
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: beat
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: beat
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: beat
+          image: rag-pipeline/backend:latest
+          imagePullPolicy: IfNotPresent
+          command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=INFO", "-s", "/tmp/celerybeat-schedule"]
+          envFrom:
+            - configMapRef:
+                name: rag-pipeline-config
+            - secretRef:
+                name: rag-pipeline-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi

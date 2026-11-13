@@ -1,0 +1,17 @@
+# Raw uploads are written by the API and read by the workers, so this volume must be shared.
+# With more than one replica it needs a ReadWriteMany storage class (NFS, EFS, Filestore, CephFS...).
+# On a single-node cluster (kind/minikube/k3s) the default ReadWriteOnce class is enough only if all
+# pods land on the same node; set storageClassName in an overlay for your cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rag-pipeline-uploads
+  namespace: rag-pipeline
+  labels:
+    app.kubernetes.io/name: rag-pipeline
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi

@@ -1,67 +1,114 @@
 # rag-pipeline
 
-An **enterprise-grade, ready-to-go RAG pipeline** — scalable, customizable, and deployable in
-any organization or personal environment. Turn documents into a queryable knowledge base:
-ingest → parse → chunk → embed → store → retrieve → answer, behind a FastAPI API, async
-Celery workers, and a Langfuse-style dashboard.
+A self-hostable **Retrieval-Augmented Generation pipeline**: upload documents, have them parsed,
+chunked, embedded and indexed by background workers, then ask questions and get answers with
+cited sources. FastAPI + Celery + Postgres/pgvector + ChromaDB + a React dashboard, runnable on a
+laptop with Docker Compose and shaped for Kubernetes (Kustomize).
 
-## Features
-
-- **Ready-to-go RAG pipeline** — opinionated, runnable defaults out of the box.
-- **Dashboard + Docker image, Langfuse-style** — traces, usage, ingestion status; one-command
-  local stack.
-- **Scalable + deployable on Kubernetes** — same image/manifests on Compose (dev) and K8s (prod)
-  with HPA.
-- **Celery workers** — async ingestion/embedding/cleanup that scale horizontally.
-- **Document parser** — original, self-contained (`backend/app/services/`); PDF via
-  OCR/vision backends, DOCX via docling → markdown. Every
-  knob configurable (provider, model, system prompt, DPI, OCR lang).
-- **Customizable** — pluggable chunking, embedding models, LLM providers, vector store, prompts,
-  and parser behavior.
-
-## Stack
-
-OpenRouter (chat + vision parsing, free tier) · FastAPI · Celery + Redis · Postgres + pgvector ·
-ChromaDB · React + Vite. Embeddings via Ollama (`mxbai-embed-large`), providers wired through our
-own thin SDK/HTTP adapters (no LangChain). Managed with `uv`. See
-[docs/adr/0001-stack.md](docs/adr/0001-stack.md) for rationale.
-
-## Quick start (local)
-
-Requires: Docker, `uv`, `node`.
-
-```bash
-cp .env.example .env        # fill in OPENROUTER_API_KEY (vision parsing)
-make install                # uv sync + npm install
-docker compose up -d        # full stack: api, worker, db, redis, chroma, frontend
-make migrate                # alembic upgrade head
+```
+upload ─► API (FastAPI) ─► Redis ─► Celery worker ─► parse ─► chunk ─► embed ─► Chroma + Postgres
+                                                                                     │
+question ─► API ─► embed query ─► Chroma similarity ─► LLM (grounded prompt) ─► answer + sources
 ```
 
-- API: http://localhost:8000 (docs at `/docs`)
-- Dashboard: http://localhost:5173
+## What it does
 
-Run without Docker:
+- **Ingest** — `POST /documents` (pdf, docx, txt, md). The API only stores the file and enqueues a
+  job; a worker does the heavy lifting and reports status you can poll (`GET /jobs/{id}`).
+- **Parse** — PDFs are rendered to page images and read by a vision LLM (OpenRouter / OpenAI /
+  Anthropic) or Tesseract OCR; DOCX goes through docling to markdown. Provider, model, system
+  prompt, DPI, OCR language and timeouts are all config ([ADR-0002](docs/adr/0002-document-parsing.md)).
+- **Chunk** — content-defined chunking (rolling hash), so editing one paragraph leaves the other
+  chunks — and their SHA-256 hashes — unchanged ([ADR-0003](docs/adr/0003-chunking.md)).
+- **Answer** — `POST /chat` retrieves the nearest chunks (optionally limited to chosen documents),
+  builds a numbered-context prompt and returns the answer plus the sources it used. If nothing
+  relevant is found the LLM is not called.
+- **Observe** — Langfuse spans for every ingest stage and chat request; prompt/question content is
+  only sent when `LANGFUSE_CAPTURE_CONTENT=true`. Structured JSON logs carry `job_id` / `chat_id`.
+- **Dashboard** — upload with live job status, document list/detail with chunks, chat with citations.
+- **Housekeeping** — a Celery beat task removes orphaned upload directories.
+
+## Quick start (Docker Compose)
+
+Requires Docker and [Ollama](https://ollama.com) on the host (embeddings), plus a free
+[OpenRouter](https://openrouter.ai) key for chat.
 
 ```bash
-make db-up                  # db + redis + chroma only
-make run-backend            # uvicorn :8000
-make run-frontend           # vite :5173
+ollama pull mxbai-embed-large
+cp .env.example .env            # set OPENROUTER_API_KEY; single-quote values containing special chars
+docker compose up -d --build    # db, redis, chroma, migrate (one-shot), api, worker, beat, frontend
 ```
 
-## Quality gates
+- Dashboard: http://localhost:5173 &nbsp;·&nbsp; API docs: http://localhost:8000/docs
+
+Inside the containers the service hostnames (`db`, `redis`, `chroma`) and the host Ollama
+(`host.docker.internal`) override whatever `.env` says, so the same `.env` works for host-run
+development and for Compose.
+
+### Without containers for the app
 
 ```bash
-make check                  # ruff + mypy + pytest (backend) + lint/typecheck/test (frontend)
+make install        # uv sync + npm install
+make db-up          # postgres, redis, chroma only
+make migrate
+make run-backend    # :8000        (worker: uv run celery -A app.celery_app worker, from backend/)
+make run-frontend   # :5173
 ```
 
-Never commit with failing gates.
+## Configuration
 
-## Deploy to Kubernetes
+Three layers, highest wins: environment variables → `config/config.<RAG_ENV>.json` → defaults
+(`backend/app/config.py`). Secrets (API keys, `DATABASE_URL`, …) live in `.env` / Kubernetes
+Secrets; tunables (models, chunk size, top-k, parser knobs) are plain config. Everything is
+swappable: `LLM_PROVIDER` (openrouter | openai | anthropic), `EMBEDDING_PROVIDER` (ollama | openai),
+`PARSER_PROVIDER` (openrouter | openai | anthropic | ocr). Free-tier OpenRouter models come and go —
+if chat returns a 502, check `DEFAULT_LLM_MODEL` against OpenRouter's current model list.
+
+## API
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/documents` | multipart upload → `{document, job}` (413 over the size limit, 415 for bad types) |
+| GET | `/documents`, `/documents/{id}`, `/documents/{id}/chunks` | list / detail with jobs / indexed chunks |
+| DELETE | `/documents/{id}` | removes the row, chunks, vectors and the stored file |
+| GET | `/jobs/{id}` | `pending → running → done \| failed` (+ error) |
+| POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
+| GET | `/health` | db / redis / chroma (critical) and ollama (informational) |
+
+## Kubernetes
+
+`k8s/` holds a Kustomize base (api, worker, beat, frontend, migrate Job, Postgres, Redis, Chroma, a
+shared uploads volume) and `dev` / `prod` overlays (prod adds replicas, HPAs and an Ingress; dev adds
+an in-cluster Ollama component).
 
 ```bash
-make deploy ENV=dev        # kubectl apply -k k8s/overlays/dev
-make deploy ENV=prod       # includes HPA + resource limits
+make images REGISTRY=ghcr.io/you/rag-pipeline TAG=v0.1.0   # linux/amd64 builds
+make deploy-dry ENV=prod                                      # render only
+make deploy ENV=dev                                           # delete+apply migrate job, apply, wait
 ```
 
-See [CLAUDE.md](CLAUDE.md) for config loading, action guards, and operating rules; see
-[context/v0/README.md](context/v0/README.md) for founding scope and OPEN decisions.
+Things you must provide: real values in `k8s/base/secrets.yaml` (use sealed-secrets/SOPS), image
+tags in the overlay, an ingress host/class, and a **ReadWriteMany** storage class for the uploads
+volume when running more than one API/worker replica (the API writes files the workers read).
+
+## Quality gates and tests
+
+```bash
+make check     # ruff + strict mypy + pytest (backend) · eslint + prettier + tsc + vitest (frontend)
+```
+
+Automated tests use fakes for external services; separate real-service smoke tests are run before a
+change is considered done (see the next section).
+
+## Verified status
+
+Honest accounting of what has been exercised against real services versus only unit-tested:
+
+<!-- VERIFIED-TABLE -->
+
+## Repository map
+
+`backend/app` — `routers/` (HTTP), `services/` (parse, chunk, embed, retrieve, QA, ingest, cleanup),
+`tasks/` (Celery), `db/` (SQLAlchemy + Alembic), `schema/` (pydantic) · `frontend/src` — API client,
+zustand store, pages · `k8s/` — manifests · `docs/` — architecture and ADRs · `context/` — founding
+scope. Operating rules for contributors and agents are in [CLAUDE.md](CLAUDE.md).

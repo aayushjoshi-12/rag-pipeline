@@ -7,9 +7,13 @@ resources:
   - namespace.yaml
   - configmap.yaml
   - secrets.yaml
-  - api/deployment.yaml
-  - api/service.yaml
-  - worker/deployment.yaml
+  - storage/uploads-pvc.yaml
   - db/deployment.yaml
   - redis/deployment.yaml
   - chroma/deployment.yaml
+  - migrate/job.yaml
+  - api/deployment.yaml
+  - api/service.yaml
+  - worker/deployment.yaml
+  - beat/deployment.yaml
+  - frontend/deployment.yaml

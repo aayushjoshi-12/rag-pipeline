@@ -4,18 +4,14 @@ kind: Kustomization
 resources:
   - ../../base
 
+components:
+  - ../../components/ollama
+
+# Single-node dev clusters (kind/minikube/k3s) rarely have ReadWriteMany; RWO works there because
+# every pod lands on the one node.
 patches:
-  - patch: |-
+  - target: {kind: PersistentVolumeClaim, name: rag-pipeline-uploads}
+    patch: |-
       - op: replace
-        path: /spec/replicas
-        value: 1
-    target:
-      kind: Deployment
-      name: rag-pipeline-api
-  - patch: |-
-      - op: replace
-        path: /spec/replicas
-        value: 1
-    target:
-      kind: Deployment
-      name: rag-pipeline-worker
+        path: /spec/accessModes
+        value: [ReadWriteOnce]

@@ -16,6 +16,12 @@ spec:
       labels:
         app.kubernetes.io/component: api
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api
           image: rag-pipeline/backend:latest
@@ -27,6 +33,11 @@ spec:
                 name: rag-pipeline-config
             - secretRef:
                 name: rag-pipeline-secrets
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/data
+          # /health is 503 when db/redis/chroma are down: don't route traffic then (readiness),
+          # but only restart on a hung process (liveness hits the same cheap endpoint with slack).
           readinessProbe:
             httpGet:
               path: /health
@@ -37,8 +48,13 @@ spec:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 10
+            initialDelaySeconds: 20
             periodSeconds: 20
+            failureThreshold: 6
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests:
               cpu: 250m
@@ -46,3 +62,7 @@ spec:
             limits:
               cpu: "1"
               memory: 1Gi
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: rag-pipeline-uploads

@@ -16,6 +16,13 @@ spec:
       labels:
         app.kubernetes.io/component: worker
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 120   # let an in-flight ingest finish (warm shutdown)
       containers:
         - name: worker
           image: rag-pipeline/backend:latest
@@ -26,10 +33,28 @@ spec:
                 name: rag-pipeline-config
             - secretRef:
                 name: rag-pipeline-secrets
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/data
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "celery -A app.celery_app inspect ping -d celery@$HOSTNAME"]
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           resources:
             requests:
-              cpu: 250m
-              memory: 256Mi
-            limits:
-              cpu: "1"
+              cpu: 500m
               memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi    # docling/PDF rendering is memory-hungry
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: rag-pipeline-uploads

@@ -5,6 +5,8 @@ metadata:
   namespace: rag-pipeline
 data:
   RAG_ENV: "prod"
+  DATA_DIR: "/app/data"
+  CLEANUP_ORPHAN_AGE_HOURS: "24"
   PORT: "8000"
   LOG_LEVEL: "INFO"
   VECTOR_STORE: "chroma"
