@@ -70,7 +70,7 @@ def test_parse_routes_docx(monkeypatch: pytest.MonkeyPatch) -> None:
     assert captured["path"] == Path("f.docx")
 
 
-@pytest.mark.parametrize("filetype", ["txt", "png", "bogus", ""])
+@pytest.mark.parametrize("filetype", ["png", "bogus", ""])
 def test_parse_rejects_unsupported_filetype(filetype: str) -> None:
     with pytest.raises(UnsupportedFileTypeError, match="Unsupported file type"):
         parse(Path("f"), filetype)
@@ -205,3 +205,24 @@ def test_parse_pdf_gives_up_after_retries(monkeypatch: pytest.MonkeyPatch, tmp_p
     with pytest.raises(DocumentLoadError, match="flaky backend failed"):
         parse(pdf, "pdf", backend=AlwaysFlaky())
     assert len(calls) == 3
+
+
+@pytest.mark.parametrize(("ext", "fmt"), [("txt", "text"), ("md", "markdown")])
+def test_parse_plain_text_and_markdown(tmp_path: Path, ext: str, fmt: str) -> None:
+    f = tmp_path / f"note.{ext}"
+    f.write_text("# Title\n\nSynthetic body — ünïcode ok.", encoding="utf-8")
+    result = parse(f, ext)
+    assert result.format == fmt
+    assert result.provider == "plain"
+    assert "Synthetic body" in result.text
+
+
+def test_parse_text_tolerates_bad_bytes(tmp_path: Path) -> None:
+    f = tmp_path / "bad.txt"
+    f.write_bytes(b"ok \xff\xfe tail")
+    assert "tail" in parse(f, "txt").text
+
+
+def test_parse_text_missing_file_raises_load_error(tmp_path: Path) -> None:
+    with pytest.raises(DocumentLoadError, match="Failed to read"):
+        parse(tmp_path / "nope.txt", "txt")

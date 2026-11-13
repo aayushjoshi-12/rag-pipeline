@@ -196,3 +196,15 @@ async def delete_chunks_by_document(
         result = await sess.execute(delete(Chunk).where(Chunk.document_id == document_id))
         await sess.commit()
         return int(getattr(result, "rowcount", 0) or 0)
+
+
+async def delete_document(document_id: uuid.UUID, *, session: AsyncSession | None = None) -> bool:
+    """Delete a document (chunks and jobs cascade). Returns False if it did not exist."""
+    async with AsyncExitStack() as stack:
+        sess = await _acquire(session, stack)
+        doc = await sess.get(Document, document_id)
+        if doc is None:
+            return False
+        await sess.delete(doc)
+        await sess.commit()
+        return True

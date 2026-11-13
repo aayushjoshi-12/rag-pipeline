@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 #: Delimiter between per-page texts in ``ParseResult.text``.
 _PAGE_SEPARATOR = "\n\n--- PAGE BREAK ---\n\n"
 
-_SUPPORTED_FILETYPES = ("pdf", "docx")
+_SUPPORTED_FILETYPES = ("pdf", "docx", "txt", "md")
 
 ParseFormat = Literal["text", "markdown"]
 
@@ -58,6 +58,9 @@ def parse(
         return _parse_pdf(path, cfg, provider, backend)
     if normalized == "docx":
         return _parse_docx(path, cfg)
+
+    if normalized in ("txt", "md"):
+        return _parse_text(path, normalized)
 
     raise UnsupportedFileTypeError(
         f"Unsupported file type '{filetype}'. Supported: {', '.join(_SUPPORTED_FILETYPES)}."
@@ -127,6 +130,20 @@ def _parse_docx(path: Path, cfg: Settings) -> ParseResult:
         provider="docling",
         page_count=None,
         page_texts=[],
+    )
+
+
+def _parse_text(path: Path, filetype: str) -> ParseResult:
+    """Plain text / markdown: read as UTF-8 (undecodable bytes replaced), no backend call."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        raise DocumentLoadError(f"Failed to read {path}: {exc}") from exc
+    return ParseResult(
+        text=text,
+        format="markdown" if filetype == "md" else "text",
+        filetype=filetype,
+        provider="plain",
     )
 
 
