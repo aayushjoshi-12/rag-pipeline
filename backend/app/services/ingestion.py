@@ -23,8 +23,9 @@ from app.db.enums import DocumentStatus, JobStatus
 from app.db.models import Document
 from app.observability import log_context
 from app.services import observability
-from app.services.chunking import chunk_text
+from app.services.chunking import ChunkSpec, chunk_text
 from app.services.embeddings import Embedder
+from app.services.incremental import old_chunks_from_rows, plan_update, vector_id
 from app.services.parser import ParseResult
 from app.services.vectorstore import VectorStore
 
@@ -112,39 +113,90 @@ async def _ingest(
         if not specs:
             raise IngestError("no text could be extracted from the document")
 
-        texts = [s.text for s in specs]
+        old_rows = await ops.list_chunks_by_document(doc_id, session=session)
+        plan = plan_update(
+            old_chunks_from_rows([dict(r.metadata_) for r in old_rows]),
+            [s.content_hash for s in specs],
+            specs[0].chunker_fingerprint,
+        )
+        first_spec: dict[str, ChunkSpec] = {}
+        for sp_ in specs:
+            first_spec.setdefault(sp_.content_hash, sp_)
+
+        # Embed only the vectors that are new (a full rebuild "adds" everything).
+        add_specs = [first_spec[h] for h in plan.add_hashes]
         vectors: list[list[float]] = []
-        with observability.span("ingest.embed", chunks=len(texts)):
-            for i in range(0, len(texts), _EMBED_BATCH):
-                batch = texts[i : i + _EMBED_BATCH]
+        with observability.span("ingest.embed", chunks=len(add_specs), mode=plan.mode):
+            for i in range(0, len(add_specs), _EMBED_BATCH):
+                batch = [c.text for c in add_specs[i : i + _EMBED_BATCH]]
                 vectors.extend(await asyncio.to_thread(embedder.embed_documents, batch))
 
-        chunk_dicts: list[dict[str, Any]] = [
-            {
-                "index": s.index,
-                "text": s.text,
-                "metadata": {
-                    "content_hash": s.content_hash,
-                    "chunker_fingerprint": s.chunker_fingerprint,
-                    "start": s.start,
-                    "end": s.end,
-                    "filename": doc.filename,
-                },
+        def meta(c: ChunkSpec) -> dict[str, Any]:
+            return {
+                "content_hash": c.content_hash,
+                "chunker_fingerprint": c.chunker_fingerprint,
+                "vector_id": vector_id(doc_key, c.content_hash),
+                "start": c.start,
+                "end": c.end,
+                "filename": doc.filename,
             }
-            for s in specs
+
+        chunk_dicts: list[dict[str, Any]] = [
+            {"index": c.index, "text": c.text, "metadata": meta(c)} for c in specs
         ]
 
-        # Replace any previous ingest of this document (idempotent re-run).
-        with observability.span("ingest.store", chunks=len(chunk_dicts)):
-            await asyncio.to_thread(store.delete_doc, doc_key)
+        with observability.span("ingest.store", chunks=len(chunk_dicts), mode=plan.mode):
+            wrote_vectors = True  # from here a failure leaves a clean slate (next run = full rebuild)
+            if plan.mode == "full":
+                await asyncio.to_thread(store.delete_doc, doc_key)
+            else:
+                await asyncio.to_thread(
+                    store.delete_ids, [vector_id(doc_key, h) for h in plan.remove_hashes]
+                )
+            if add_specs:
+                await asyncio.to_thread(
+                    store.add_chunks,
+                    doc_key,
+                    [
+                        {
+                            "id": vector_id(doc_key, c.content_hash),
+                            "text": c.text,
+                            "metadata": {**meta(c), "index": c.index},
+                        }
+                        for c in add_specs
+                    ],
+                    vectors,
+                )
+            # Reused vectors only need their position metadata refreshed.
+            old_first_index: dict[str, int] = {}
+            for r in sorted(old_rows, key=lambda r: r.index):
+                old_first_index.setdefault(str(r.metadata_.get("content_hash")), r.index)
+            moved = [h for h in plan.keep_hashes if old_first_index.get(h) != first_spec[h].index]
+            if moved:
+                await asyncio.to_thread(
+                    store.update_metadata,
+                    [vector_id(doc_key, h) for h in moved],
+                    [
+                        {"index": first_spec[h].index, "start": first_spec[h].start, "end": first_spec[h].end}
+                        for h in moved
+                    ],
+                )
+            # Chunk rows carry no vectors, so they are simply replaced.
             await ops.delete_chunks_by_document(doc_id, session=session)
-            wrote_vectors = True
-            await asyncio.to_thread(store.add_chunks, doc_key, chunk_dicts, vectors)
             await ops.create_chunks(document_id=doc_id, chunks=chunk_dicts, session=session)
 
-        await ops.update_job_status(job_id, JobStatus.DONE, session=session)
+        stats: dict[str, object] = {
+            "mode": plan.mode,
+            "reason": plan.reason,
+            "chunks_total": len(specs),
+            "kept": len(plan.keep_hashes),
+            "added": len(plan.add_hashes),
+            "removed": len(plan.remove_hashes),
+            "embedded": len(add_specs),
+        }
+        await ops.update_job_status(job_id, JobStatus.DONE, stats=stats, session=session)
         await ops.update_document_status(doc_id, DocumentStatus.READY, session=session)
-        logger.info("ingest_done", doc_id=doc_key, chunks=len(specs))
+        logger.info("ingest_done", doc_id=doc_key, **stats)
         return JobStatus.DONE
     except Exception as exc:
         logger.exception("ingest_failed", doc_id=doc_key)

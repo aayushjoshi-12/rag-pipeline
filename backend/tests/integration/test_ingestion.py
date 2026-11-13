@@ -13,47 +13,10 @@ from app.db.enums import DocumentStatus, JobStatus
 from app.services.ingestion import ingest_document
 from app.services.parser import ParseResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import FakeEmbedder, FakeStore
 
 LONG_TEXT = " ".join(f"synthetic{i}" for i in range(600))
 
-
-class FakeEmbedder:
-    def __init__(self, fail: bool = False) -> None:
-        self.fail = fail
-        self.calls = 0
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        self.calls += 1
-        if self.fail:
-            raise RuntimeError("embedder down")
-        return [[float(len(t)), 1.0, 0.0] for t in texts]
-
-    def embed_query(self, text: str) -> list[float]:
-        return [float(len(text)), 1.0, 0.0]
-
-
-class FakeStore:
-    def __init__(self) -> None:
-        self.docs: dict[str, list[dict[str, Any]]] = {}
-        self.deleted: list[str] = []
-
-    def add_chunks(
-        self, doc_id: str, chunks: list[dict[str, Any]], embeddings: list[list[float]]
-    ) -> None:
-        assert len(chunks) == len(embeddings)
-        self.docs[doc_id] = chunks
-
-    def similarity_search(
-        self, query_embedding: list[float], top_k: int = 5, filters: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
-        return []
-
-    def delete_doc(self, doc_id: str) -> None:
-        self.deleted.append(doc_id)
-        self.docs.pop(doc_id, None)
-
-    def reset(self) -> None:
-        self.docs.clear()
 
 
 def _parse_ok(text: str = LONG_TEXT):
@@ -97,7 +60,7 @@ async def test_happy_path(db_session: AsyncSession, tmp_path: Path) -> None:
     rows = await ops.list_chunks_by_document(doc_id, session=db_session)
     assert len(rows) > 1
     assert [r.index for r in rows] == list(range(len(rows)))
-    assert len(store.docs[str(doc_id)]) == len(rows)
+    assert len(store.vectors) == len({r.metadata_['content_hash'] for r in rows})
     assert "content_hash" in rows[0].metadata_ and "chunker_fingerprint" in rows[0].metadata_
 
 
@@ -114,7 +77,7 @@ async def test_rerun_replaces_chunks_without_duplicating(
     await ingest_document(job.id, parse_fn=_parse_ok(), **kwargs)
     second = len(await ops.list_chunks_by_document(doc.id, session=db_session))
     assert first == second > 0
-    assert len(store.docs[str(doc.id)]) == second
+    assert store.texts_for(str(doc.id))
 
 
 async def test_parse_failure_marks_failed_and_records_error(
@@ -150,7 +113,7 @@ async def test_embed_failure_leaves_no_vectors(db_session: AsyncSession, tmp_pat
         store=store,
     )
     assert status == JobStatus.FAILED
-    assert str(doc.id) not in store.docs
+    assert not store.texts_for(str(doc.id))
 
 
 async def test_missing_source_file_fails_cleanly(db_session: AsyncSession, tmp_path: Path) -> None:

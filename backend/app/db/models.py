@@ -81,6 +81,8 @@ class Job(Base):
     task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[JobStatus] = mapped_column(String(20), default=JobStatus.PENDING)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Ingest summary (mode, kept/added/removed chunk counts, embedded count). Null until done.
+    stats: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), default=_utcnow
     )

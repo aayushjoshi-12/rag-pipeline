@@ -129,6 +129,7 @@ async def update_job_status(
     *,
     error: str | None = None,
     task_id: str | None = None,
+    stats: dict[str, object] | None = None,
     session: AsyncSession | None = None,
 ) -> Job | None:
     async with AsyncExitStack() as stack:
@@ -141,6 +142,8 @@ async def update_job_status(
             job.error = error
         if task_id is not None:
             job.task_id = task_id
+        if stats is not None:
+            job.stats = stats
         await sess.commit()
         await sess.refresh(job)
         return job

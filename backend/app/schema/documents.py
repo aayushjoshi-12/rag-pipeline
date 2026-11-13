@@ -21,6 +21,7 @@ class JobOut(_ORM):
     task_id: str | None
     status: JobStatus
     error: str | None
+    stats: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

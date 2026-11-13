@@ -35,6 +35,14 @@ class VectorStore(Protocol):
         """Remove all chunks belonging to *doc_id*."""
         ...
 
+    def delete_ids(self, ids: list[str]) -> None:
+        """Remove specific vectors by id (no-op for ids that do not exist)."""
+        ...
+
+    def update_metadata(self, ids: list[str], metadatas: list[dict[str, Any]]) -> None:
+        """Merge new metadata into existing vectors without touching their embeddings."""
+        ...
+
     def reset(self) -> None:
         """Drop and recreate the collection (dev/test only)."""
         ...
@@ -72,7 +80,8 @@ class ChromaStore:
         metadatas: list[dict[str, Any]] = []
 
         for idx, chunk in enumerate(chunks):
-            chunk_id = f"{doc_id}_{idx}"
+            # An explicit id (content-addressed, see services.incremental) wins over position.
+            chunk_id = str(chunk.get("id") or f"{doc_id}_{idx}")
             ids.append(chunk_id)
             documents.append(chunk["text"])
             metadatas.append(
@@ -135,6 +144,16 @@ class ChromaStore:
 
     def delete_doc(self, doc_id: str) -> None:
         self._collection.delete(where={"doc_id": doc_id})
+
+    def delete_ids(self, ids: list[str]) -> None:
+        if ids:
+            self._collection.delete(ids=ids)
+
+    def update_metadata(self, ids: list[str], metadatas: list[dict[str, Any]]) -> None:
+        if len(ids) != len(metadatas):
+            raise ValueError("ids and metadatas must have equal length.")
+        if ids:
+            self._collection.update(ids=ids, metadatas=cast(Any, metadatas))
 
     def reset(self) -> None:
         name = self._collection.name
