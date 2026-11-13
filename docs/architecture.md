@@ -33,7 +33,7 @@ flowchart LR
 
     subgraph PROVIDERS["External providers — pluggable"]
         EMB["Embedding API<br/>Ollama mxbai-embed-large"]
-        LLM["Answer synthesis<br/>OpenRouter (free tier)<br/>nemotron-3-super-120b"]
+        LLM["Answer synthesis<br/>OpenRouter (free tier)<br/>nemotron-3-ultra-550b"]
         VIS["Vision parsing<br/>OpenRouter (free tier)<br/>nemotron-3-nano-omni"]
     end
 

@@ -153,6 +153,7 @@ class Settings(BaseSettings):
     secret_key: str = ""
     data_dir: Path = Path("data")
     max_upload_size_bytes: int = 25 * 1024 * 1024
+    cleanup_orphan_age_hours: float = 24.0
 
     # ── Persistence ──────────────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
@@ -174,7 +175,7 @@ class Settings(BaseSettings):
 
     # ── Chat/QA synthesis (OpenRouter default) ───────────────────────────────
     llm_provider: str = "openrouter"
-    default_llm_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    default_llm_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
     # ── LLM provider keys (secrets) ──────────────────────────────────────────
     openrouter_api_key: str = ""
@@ -219,6 +220,8 @@ class Settings(BaseSettings):
             raise SettingsError(f"Unknown parser provider '{self.parser_provider}'.")
         if self.docx_reader not in ("docling",):
             raise SettingsError(f"Unknown DOCX reader '{self.docx_reader}'.")
+        if self.cleanup_orphan_age_hours < 0:
+            raise SettingsError("cleanup_orphan_age_hours must be >= 0.")
         self._warn_langfuse()
         if not (256 <= self.parser_max_completion_tokens <= 32000):
             raise SettingsError(

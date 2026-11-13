@@ -21,6 +21,6 @@ data:
   EMBEDDING_MODEL: "mxbai-embed-large"
   OLLAMA_BASE_URL: "http://ollama:11434"
   LLM_PROVIDER: "openrouter"
-  DEFAULT_LLM_MODEL: "nvidia/nemotron-3-super-120b-a12b:free"
+  DEFAULT_LLM_MODEL: "nvidia/nemotron-3-ultra-550b-a55b:free"
   PARSER_PROVIDER: "openrouter"
   PARSER_LLM_MODEL: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"

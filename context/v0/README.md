@@ -96,7 +96,7 @@ must gate on it rather than invent a default:
 - **LLM provider defaults (D2 — updated):** embeddings default to **Ollama local
   `mxbai-embed-large`** (already installed locally). Chat/QA answer synthesis and document
   parsing both default to **OpenRouter** free tier (no OpenAI/Anthropic keys): chat →
-  `nvidia/nemotron-3-super-120b-a12b:free`, PDF vision → `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`.
+  `nvidia/nemotron-3-ultra-550b-a55b:free`, PDF vision → `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free`.
   All multi-provider behind `EMBEDDING_PROVIDER` / `LLM_PROVIDER` / `PARSER_PROVIDER`.
 - **Document parser (D3 — answered, see `docs/adr/0002-document-parsing.md`):** an original
   parse service in `backend/app/services/` — PDF page renderer, Tesseract OCR backend, OpenAI/

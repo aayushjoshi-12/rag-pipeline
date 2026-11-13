@@ -33,7 +33,7 @@ def test_settings_defaults(clear_env: None) -> None:
     assert s.embedding_provider == "ollama"
     assert s.embedding_model == "mxbai-embed-large"
     assert s.llm_provider == "openrouter"
-    assert s.default_llm_model == "nvidia/nemotron-3-super-120b-a12b:free"
+    assert s.default_llm_model == "nvidia/nemotron-3-ultra-550b-a55b:free"
 
 
 def test_settings_reject_secrets_in_json(tmp_path: Path) -> None:

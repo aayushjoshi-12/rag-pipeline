@@ -21,7 +21,7 @@ schedulers in the core).
   server/remote Chroma for K8s (see OPEN D1).
 - **Embeddings / LLM:** pluggable (`get_embedder`, `qa.py`) — **embeddings default to local
   Ollama `mxbai-embed-large`**; chat/QA synthesis defaults to **OpenRouter** free tier
-  (`nvidia/nemotron-3-super-120b-a12b:free`). Both multi-provider behind `EMBEDDING_PROVIDER`
+  (`nvidia/nemotron-3-ultra-550b-a55b:free`). Both multi-provider behind `EMBEDDING_PROVIDER`
   / `LLM_PROVIDER` (see D2).
 - **Retrieval + synthesis:** built in-house on the provider SDKs / HTTP APIs directly — no
   LangChain. A small `Embedder` protocol / `VectorStore` protocol / QA service wrap the providers
