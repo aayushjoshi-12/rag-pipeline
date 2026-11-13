@@ -219,8 +219,23 @@ class Settings(BaseSettings):
             raise SettingsError(f"Unknown parser provider '{self.parser_provider}'.")
         if self.docx_reader not in ("docling",):
             raise SettingsError(f"Unknown DOCX reader '{self.docx_reader}'.")
+        self._warn_langfuse()
         if not (256 <= self.parser_max_completion_tokens <= 32000):
             raise SettingsError(
                 "parser_max_completion_tokens must be within 256..32000."
             )
         return self
+
+    def _warn_langfuse(self) -> None:
+        """Tracing is best-effort: a malformed Langfuse config warns, it never fails startup."""
+        if not (self.langfuse_public_key or self.langfuse_secret_key):
+            return
+        log = logging.getLogger(__name__)
+        if not (self.langfuse_public_key and self.langfuse_secret_key):
+            log.warning("Langfuse is half-configured (need both public and secret key); tracing off.")
+        if not self.langfuse_host.startswith(("http://", "https://")):
+            log.warning("LANGFUSE_HOST %r is not an http(s) URL; tracing may fail.", self.langfuse_host)
+        if self.langfuse_public_key and not self.langfuse_public_key.startswith("pk-"):
+            log.warning("LANGFUSE_PUBLIC_KEY does not look like a Langfuse public key (pk-...).")
+        if self.langfuse_secret_key and not self.langfuse_secret_key.startswith("sk-"):
+            log.warning("LANGFUSE_SECRET_KEY does not look like a Langfuse secret key (sk-...).")

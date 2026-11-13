@@ -9,24 +9,26 @@ on the ``content_hash`` / ``chunker_fingerprint`` stored in each chunk's metadat
 from __future__ import annotations
 
 import asyncio
-import logging
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.db import ops
 from app.db.enums import DocumentStatus, JobStatus
 from app.db.models import Document
+from app.observability import log_context
+from app.services import observability
 from app.services.chunking import chunk_text
 from app.services.embeddings import Embedder
 from app.services.parser import ParseResult
 from app.services.vectorstore import VectorStore
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 ParseFn = Callable[[Path, str, Settings], ParseResult]
 
@@ -62,9 +64,25 @@ async def ingest_document(
     store: VectorStore,
 ) -> JobStatus:
     """Run the ingest for ``job_id``. Never raises; the outcome lives on the job row."""
+    with log_context(job_id=str(job_id)), observability.span("ingest.document", job_id=str(job_id)) as root:
+        status = await _ingest(job_id, session, settings, parse_fn, embedder, store)
+        root.update(output=status.value)
+        if status != JobStatus.DONE:
+            root.update(level="ERROR", status_message="ingest failed")
+        return status
+
+
+async def _ingest(
+    job_id: uuid.UUID,
+    session: AsyncSession,
+    settings: Settings,
+    parse_fn: ParseFn,
+    embedder: Embedder,
+    store: VectorStore,
+) -> JobStatus:
     job = await ops.get_job(job_id, session=session)
     if job is None:
-        logger.error("ingest: job %s not found", job_id)
+        logger.error("ingest_job_not_found")
         return JobStatus.FAILED
     doc_id = job.document_id
     doc_key = str(doc_id)
@@ -81,20 +99,25 @@ async def ingest_document(
         if not path.is_file():
             raise IngestError(f"source file not found: {path}")
 
-        parsed = await asyncio.to_thread(parse_fn, path, _filetype(doc), settings)
-        specs = chunk_text(
-            parsed.text,
-            chunk_size=settings.chunk_size,
-            chunk_overlap=settings.chunk_overlap,
-        )
+        with observability.span("ingest.parse", filetype=_filetype(doc)) as sp:
+            parsed = await asyncio.to_thread(parse_fn, path, _filetype(doc), settings)
+            sp.update(metadata={"provider": parsed.provider, "chars": len(parsed.text)})
+        with observability.span("ingest.chunk") as sp:
+            specs = chunk_text(
+                parsed.text,
+                chunk_size=settings.chunk_size,
+                chunk_overlap=settings.chunk_overlap,
+            )
+            sp.update(metadata={"chunks": len(specs)})
         if not specs:
             raise IngestError("no text could be extracted from the document")
 
         texts = [s.text for s in specs]
         vectors: list[list[float]] = []
-        for i in range(0, len(texts), _EMBED_BATCH):
-            batch = texts[i : i + _EMBED_BATCH]
-            vectors.extend(await asyncio.to_thread(embedder.embed_documents, batch))
+        with observability.span("ingest.embed", chunks=len(texts)):
+            for i in range(0, len(texts), _EMBED_BATCH):
+                batch = texts[i : i + _EMBED_BATCH]
+                vectors.extend(await asyncio.to_thread(embedder.embed_documents, batch))
 
         chunk_dicts: list[dict[str, Any]] = [
             {
@@ -112,18 +135,19 @@ async def ingest_document(
         ]
 
         # Replace any previous ingest of this document (idempotent re-run).
-        await asyncio.to_thread(store.delete_doc, doc_key)
-        await ops.delete_chunks_by_document(doc_id, session=session)
-        wrote_vectors = True
-        await asyncio.to_thread(store.add_chunks, doc_key, chunk_dicts, vectors)
-        await ops.create_chunks(document_id=doc_id, chunks=chunk_dicts, session=session)
+        with observability.span("ingest.store", chunks=len(chunk_dicts)):
+            await asyncio.to_thread(store.delete_doc, doc_key)
+            await ops.delete_chunks_by_document(doc_id, session=session)
+            wrote_vectors = True
+            await asyncio.to_thread(store.add_chunks, doc_key, chunk_dicts, vectors)
+            await ops.create_chunks(document_id=doc_id, chunks=chunk_dicts, session=session)
 
         await ops.update_job_status(job_id, JobStatus.DONE, session=session)
         await ops.update_document_status(doc_id, DocumentStatus.READY, session=session)
-        logger.info("ingest %s done: %d chunks", job_id, len(specs))
+        logger.info("ingest_done", doc_id=doc_key, chunks=len(specs))
         return JobStatus.DONE
     except Exception as exc:
-        logger.exception("ingest %s failed", job_id)
+        logger.exception("ingest_failed", doc_id=doc_key)
         await _record_failure(session, store, job_id, doc_id, doc_key, wrote_vectors, exc)
         return JobStatus.FAILED
 
@@ -146,4 +170,4 @@ async def _record_failure(
         await ops.update_job_status(job_id, JobStatus.FAILED, error=message, session=session)
         await ops.update_document_status(doc_id, DocumentStatus.FAILED, session=session)
     except Exception:
-        logger.exception("ingest %s: could not record failure", job_id)
+        logger.exception("ingest_failure_not_recorded")

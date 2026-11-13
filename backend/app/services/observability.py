@@ -54,6 +54,47 @@ def generation(name: str, *, model: str, input: Any = None, **metadata: Any) -> 
         yield span
 
 
+@contextmanager
+def span(name: str, *, input: Any = None, **metadata: Any) -> Iterator[Any]:
+    """Open a Langfuse span (nests under the current one); no-op if tracing is unavailable.
+
+    ``input`` is passed through ``maybe_content`` so prompts/questions only leave the process
+    when content capture is on. Exceptions are recorded on the span and re-raised.
+    """
+    try:
+        from langfuse import get_client
+
+        cm = get_client().start_as_current_observation(
+            name=name,
+            as_type="span",
+            input=maybe_content(input) if input is not None else None,
+            metadata=metadata or None,
+        )
+    except Exception:  # tracing must never break the request
+        logger.debug("Langfuse unavailable; skipping span", exc_info=True)
+        yield _NullGeneration()
+        return
+    with cm as sp:
+        try:
+            yield sp
+        except Exception as exc:
+            try:
+                sp.update(level="ERROR", status_message=f"{type(exc).__name__}: {exc}"[:500])
+            except Exception:
+                logger.debug("could not mark span as errored", exc_info=True)
+            raise
+
+
+def flush() -> None:
+    """Best-effort flush of buffered spans (call on shutdown / end of a short-lived task)."""
+    try:
+        from langfuse import get_client
+
+        get_client().flush()
+    except Exception:
+        logger.debug("Langfuse flush failed", exc_info=True)
+
+
 def usage_details(prompt_tokens: int | None, completion_tokens: int | None) -> dict[str, int]:
     """Langfuse ``usage_details`` payload from provider token counts."""
     details: dict[str, int] = {}

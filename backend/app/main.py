@@ -11,6 +11,8 @@ from app.config import Settings
 from app.db.engine import engine
 from app.observability import configure_for_server
 from app.routers import chat, documents, health
+from app.services import observability
+from app.services.langfuse import configure_from_settings
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -19,6 +21,7 @@ settings = Settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_for_server(level=logging.getLevelName(settings.log_level))
+    configure_from_settings(settings)
     logger.info("rag-pipeline starting (env=%s)", settings.rag_env)
     # Warm the async engine pool; failures are non-fatal here (health endpoint reports).
     try:
@@ -27,6 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("DB not reachable at startup: %s", exc)
     yield
+    observability.flush()
     await engine.dispose()
 
 
