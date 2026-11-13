@@ -95,6 +95,21 @@ def test_settings_unknown_provider_rejected() -> None:
             Settings()
 
 
+def test_settings_unknown_parser_provider_rejected() -> None:
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("PARSER_PROVIDER", "gemini")
+        with pytest.raises(ValidationError, match="Unknown parser provider"):
+            Settings()
+
+
+def test_settings_parser_provider_accepts_ocr() -> None:
+    assert Settings(parser_provider="ocr").parser_provider == "ocr"
+
+
+def test_settings_parser_provider_accepts_openrouter() -> None:
+    assert Settings(parser_provider="openrouter").parser_provider == "openrouter"
+
+
 def test_secret_field_names_picklist_nonempty() -> None:
     assert "openrouter_api_key" in SECRET_FIELD_NAMES
     assert "database_url" in SECRET_FIELD_NAMES

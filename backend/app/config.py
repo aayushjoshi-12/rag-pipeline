@@ -194,6 +194,7 @@ class Settings(BaseSettings):
         "possible. Output plain text only — no commentary."
     )
     parser_timeout_seconds: float = 60.0
+    parser_max_completion_tokens: int = 16032
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     pdf_dpi: int = 300
     ocr_lang: str = "eng"
@@ -214,4 +215,12 @@ class Settings(BaseSettings):
             raise SettingsError(f"Unknown embedding provider '{self.embedding_provider}'.")
         if self.vector_store not in ("chroma",):
             raise SettingsError(f"Unknown vector store '{self.vector_store}'.")
+        if self.parser_provider not in ("openrouter", "openai", "anthropic", "ocr"):
+            raise SettingsError(f"Unknown parser provider '{self.parser_provider}'.")
+        if self.docx_reader not in ("docling",):
+            raise SettingsError(f"Unknown DOCX reader '{self.docx_reader}'.")
+        if not (256 <= self.parser_max_completion_tokens <= 32000):
+            raise SettingsError(
+                "parser_max_completion_tokens must be within 256..32000."
+            )
         return self
