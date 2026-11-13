@@ -30,7 +30,7 @@ def test_chunk_has_expected_columns() -> None:
 
 def test_job_has_expected_columns() -> None:
     cols = {c.name for c in Job.__table__.columns}
-    assert cols == {"id", "document_id", "task_id", "status", "error", "created_at", "updated_at"}
+    assert cols == {"id", "document_id", "task_id", "status", "error", "stats", "created_at", "updated_at"}
 
 
 def test_all_tables_registered_in_metadata() -> None:
