@@ -1,19 +1,26 @@
 import { NavLink, Route, Routes } from 'react-router-dom'
-
-function Placeholder({ title }: { title: string }) {
-  return <h1>{title}</h1>
-}
+import ChatPage from './pages/ChatPage'
+import DocumentDetailPage from './pages/DocumentDetailPage'
+import DocumentsPage from './pages/DocumentsPage'
+import OverviewPage from './pages/OverviewPage'
 
 export default function App() {
   return (
-    <div>
+    <div className="shell">
       <nav>
-        <NavLink to="/">Overview</NavLink> <NavLink to="/documents">Documents</NavLink>
+        <strong>rag-pipeline</strong>
+        <NavLink to="/" end>
+          Overview
+        </NavLink>
+        <NavLink to="/documents">Documents</NavLink>
+        <NavLink to="/chat">Chat</NavLink>
       </nav>
       <main>
         <Routes>
-          <Route path="/" element={<Placeholder title="Overview" />} />
-          <Route path="/documents" element={<Placeholder title="Documents" />} />
+          <Route path="/" element={<OverviewPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/documents/:id" element={<DocumentDetailPage />} />
+          <Route path="/chat" element={<ChatPage />} />
         </Routes>
       </main>
     </div>

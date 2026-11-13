@@ -1,0 +1,86 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+body {
+  margin: 0;
+}
+.shell nav {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid #8884;
+  align-items: center;
+}
+.shell nav a.active {
+  font-weight: 700;
+  text-decoration: underline;
+}
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem 1.25rem;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+th,
+td {
+  text-align: left;
+  padding: 0.4rem;
+  border-bottom: 1px solid #8883;
+}
+.badge {
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  background: #8883;
+}
+.badge-ready,
+.badge-done,
+.badge-ok {
+  background: #2a72;
+  color: #1a7a2e;
+}
+.badge-failed {
+  background: #d222;
+  color: #b00020;
+}
+.badge-running,
+.badge-ingesting {
+  background: #28d2;
+  color: #0a58ca;
+}
+.error {
+  color: #b00020;
+}
+.job {
+  margin: 0.75rem 0;
+}
+.job-head {
+  display: flex;
+  justify-content: space-between;
+}
+.job progress {
+  width: 100%;
+}
+.chunk {
+  border-left: 3px solid #8885;
+  padding-left: 0.75rem;
+  margin: 0.75rem 0;
+}
+.answer {
+  white-space: pre-wrap;
+}
+fieldset label {
+  display: block;
+}
+form label {
+  display: block;
+  margin: 0.5rem 0;
+}
+form input[type='text'],
+form input:not([type]) {
+  width: 100%;
+}
