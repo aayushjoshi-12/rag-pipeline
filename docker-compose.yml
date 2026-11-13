@@ -76,6 +76,8 @@ services:
     build:
       context: ./frontend
     container_name: rag-pipeline-frontend
+    environment:
+      VITE_PROXY_TARGET: http://api:8000
     ports:
       - "5173:5173"
     depends_on:
