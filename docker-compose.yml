@@ -12,6 +12,8 @@ x-backend-env: &backend-env
   DATA_DIR: /app/data
 
 x-backend: &backend
+  # One tag shared by api/worker/beat/migrate so Compose builds the backend image once.
+  image: rag-pipeline-backend:local
   build:
     context: ./backend
   env_file: .env
