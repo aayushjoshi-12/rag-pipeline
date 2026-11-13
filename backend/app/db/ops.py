@@ -85,6 +85,27 @@ async def update_document_status(
         return doc
 
 
+async def replace_document_source(
+    document_id: uuid.UUID,
+    *,
+    filename: str,
+    content_type: str,
+    source_path: str,
+    session: AsyncSession | None = None,
+) -> Document | None:
+    """Point a document at a new source file and mark it pending for re-ingest."""
+    async with AsyncExitStack() as stack:
+        sess = await _acquire(session, stack)
+        doc = await sess.get(Document, document_id)
+        if doc is None:
+            return None
+        doc.filename, doc.content_type = filename, content_type
+        doc.source_path, doc.status = source_path, DocumentStatus.PENDING
+        await sess.commit()
+        await sess.refresh(doc)
+        return doc
+
+
 # ── Jobs ──────────────────────────────────────────────────────────────────────
 
 

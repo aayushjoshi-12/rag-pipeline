@@ -195,3 +195,68 @@ async def test_api_never_parses(client: Any, monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(parser_mod, "parse", boom)
     c, _, _ = client
     assert (await _upload(c)).status_code == 201
+
+
+async def _put(
+    c: httpx.AsyncClient,
+    doc_id: str,
+    name: str = "note.md",
+    data: bytes = b"# v2\n\nchanged",
+    ctype: str = "text/markdown",
+) -> httpx.Response:
+    return await c.put(f"/documents/{doc_id}", files={"file": (name, data, ctype)})
+
+
+async def test_put_replaces_file_creates_new_job_and_removes_old_file(client: Any) -> None:
+    c, h, root = client
+    up = (await _upload(c, "v.md", b"version one")).json()
+    doc_id = up["document"]["id"]
+    old = next(iter((root / "uploads").rglob("v.md")))
+
+    r = await _put(c, doc_id, "v.md", b"version two")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["document"]["id"] == doc_id and body["document"]["status"] == "pending"
+    assert body["job"]["id"] != up["job"]["id"] and len(h.enqueued) == 2
+    assert h.enqueued[-1] == body["job"]["id"]
+    files = list((root / "uploads").rglob("v.md"))
+    assert len(files) == 1 and files[0].read_bytes() == b"version two" and files[0] != old
+    jobs = (await c.get(f"/documents/{doc_id}")).json()["jobs"]
+    assert len(jobs) == 2
+
+
+async def test_put_can_change_the_file_type(client: Any) -> None:
+    c, _, _ = client
+    doc_id = (await _upload(c, "a.md", b"x")).json()["document"]["id"]
+    r = await _put(c, doc_id, "a.txt", b"plain", "text/plain")
+    assert (
+        r.json()["document"]["filename"] == "a.txt"
+        and r.json()["document"]["content_type"] == "text/plain"
+    )
+
+
+async def test_put_unknown_document_is_404_and_stores_nothing(client: Any) -> None:
+    c, h, root = client
+    r = await _put(c, str(uuid.uuid4()))
+    assert r.status_code == 404 and h.enqueued == []
+    assert not list((root / "uploads").rglob("note.md"))
+
+
+async def test_put_validation_keeps_the_existing_version(client: Any) -> None:
+    c, h, root = client
+    doc_id = (await _upload(c, "keep.md", b"original")).json()["document"]["id"]
+    assert (await _put(c, doc_id, "bad.exe", b"MZ", "application/octet-stream")).status_code == 415
+    assert (await _put(c, doc_id, "big.txt", b"x" * 4096, "text/plain")).status_code == 413
+    assert (await _put(c, doc_id, "empty.txt", b"", "text/plain")).status_code == 400
+    assert len(h.enqueued) == 1
+    kept = list((root / "uploads").rglob("keep.md"))
+    assert len(kept) == 1 and kept[0].read_bytes() == b"original"
+    assert (await c.get(f"/documents/{doc_id}")).json()["status"] == "pending"
+
+
+async def test_put_enqueue_failure_is_503_and_marks_failed(client: Any) -> None:
+    c, h, _ = client
+    doc_id = (await _upload(c, "q.md", b"one")).json()["document"]["id"]
+    h.fail_enqueue = True
+    assert (await _put(c, doc_id)).status_code == 503
+    assert (await c.get(f"/documents/{doc_id}")).json()["status"] == "failed"

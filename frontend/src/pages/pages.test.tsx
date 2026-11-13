@@ -14,6 +14,7 @@ vi.mock('../api/client', () => ({
     deleteDocument: vi.fn(),
     getJob: vi.fn(),
     upload: vi.fn(),
+    replace: vi.fn(),
     chat: vi.fn(),
   },
   ApiError: class ApiError extends Error {},
@@ -134,6 +135,52 @@ describe('Document detail page', () => {
     m.listChunks.mockRejectedValue(new Error('Document not found.'))
     renderAt('/documents/nope')
     expect(await screen.findByRole('alert')).toHaveTextContent('Document not found.')
+  })
+})
+
+describe('Document replace (incremental update)', () => {
+  it('uploads a new version and shows how little was re-embedded', async () => {
+    m.getDocument.mockResolvedValue({ ...doc(), jobs: [] })
+    m.listChunks.mockResolvedValue([])
+    m.replace.mockResolvedValue({ document: doc({ status: 'pending' }), job: job() })
+    m.getJob.mockResolvedValue(
+      job({
+        status: 'done',
+        stats: {
+          mode: 'incremental',
+          reason: 'unchanged chunks reused',
+          chunks_total: 40,
+          kept: 38,
+          added: 2,
+          removed: 1,
+          embedded: 2,
+        },
+      }),
+    )
+    renderAt(`/documents/${doc().id}`)
+    await screen.findByRole('heading', { name: 'report.pdf' })
+    const file = new File(['v2'], 'report.pdf')
+    await userEvent.upload(screen.getByLabelText('New version'), file)
+    await userEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    expect(m.replace).toHaveBeenCalledWith(doc().id, file)
+    expect(await screen.findByTestId('job-stats')).toHaveTextContent(
+      'Updated: re-embedded 2 of 40 chunks (38 unchanged, 1 removed)',
+    )
+    // detail data is reloaded once the job settles
+    await waitFor(() => expect(m.getDocument.mock.calls.length).toBeGreaterThan(1))
+  })
+
+  it('shows replace errors and requires a file', async () => {
+    m.getDocument.mockResolvedValue({ ...doc(), jobs: [] })
+    m.listChunks.mockResolvedValue([])
+    m.replace.mockRejectedValue(new Error('File exceeds the limit.'))
+    renderAt(`/documents/${doc().id}`)
+    await screen.findByRole('heading', { name: 'report.pdf' })
+    await userEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('Choose a file first.')
+    await userEvent.upload(screen.getByLabelText('New version'), new File(['x'], 'a.md'))
+    await userEvent.click(screen.getByRole('button', { name: 'Replace' }))
+    expect(await screen.findByText('File exceeds the limit.')).toBeInTheDocument()
   })
 })
 

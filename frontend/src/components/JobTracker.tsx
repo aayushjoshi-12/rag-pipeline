@@ -28,6 +28,13 @@ export function JobTracker({
         <StatusBadge status={status} />
       </div>
       <progress value={pct} max={100} aria-label={`progress ${filename}`} />
+      {job?.stats && status === 'done' && (
+        <p className="stats" data-testid="job-stats">
+          {job.stats.mode === 'incremental'
+            ? `Updated: re-embedded ${job.stats.embedded} of ${job.stats.chunks_total} chunks (${job.stats.kept} unchanged, ${job.stats.removed} removed)`
+            : `Indexed ${job.stats.chunks_total} chunks`}
+        </p>
+      )}
       {job?.error && (
         <p role="alert" className="error">
           {job.error}

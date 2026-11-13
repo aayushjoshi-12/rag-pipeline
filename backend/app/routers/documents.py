@@ -56,13 +56,8 @@ def _safe_name(name: str) -> str:
     return cleaned[:200] or "upload"
 
 
-@router.post("/documents", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
-async def upload_document(
-    file: UploadFile,
-    session: Session,
-    cfg: Cfg,
-    enqueue: Annotated[Enqueue, Depends(get_enqueue)],
-) -> UploadResponse:
+async def _store_upload(file: UploadFile, cfg: Settings) -> tuple[str, Path, str]:
+    """Validate and stream an upload to disk. Returns (filename, relative path, extension)."""
     filename = _safe_name(file.filename or "")
     ext = Path(filename).suffix.lstrip(".").lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -79,10 +74,9 @@ async def upload_document(
     rel_dir = Path("uploads") / uuid.uuid4().hex
     target_dir = cfg.data_dir / rel_dir
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / filename
     size = 0
     try:
-        with target.open("wb") as out:
+        with (target_dir / filename).open("wb") as out:
             while chunk := await file.read(_CHUNK):
                 size += len(chunk)
                 if size > cfg.max_upload_size_bytes:
@@ -96,14 +90,21 @@ async def upload_document(
     except BaseException:
         shutil.rmtree(target_dir, ignore_errors=True)
         raise
+    return filename, rel_dir / filename, ext
 
-    doc = await ops.create_document(
-        filename=filename,
-        content_type=ALLOWED_EXTENSIONS[ext],
-        source_path=str(rel_dir / filename),
-        session=session,
-    )
-    job = await ops.create_job(document_id=doc.id, session=session)
+
+def _remove_upload_dir(cfg: Settings, source_path: str | None) -> None:
+    """Remove a per-upload directory (only ever our own ``uploads/<id>`` dirs)."""
+    if source_path:
+        parent = (cfg.data_dir / source_path).parent
+        if parent.parent == cfg.data_dir / "uploads":
+            shutil.rmtree(parent, ignore_errors=True)
+
+
+async def _enqueue_job(
+    session: AsyncSession, enqueue: Enqueue, doc_id: uuid.UUID
+) -> JobOut:
+    job = await ops.create_job(document_id=doc_id, session=session)
     try:
         task_id = enqueue(str(job.id))
     except Exception as exc:
@@ -111,17 +112,61 @@ async def upload_document(
         await ops.update_job_status(
             job.id, JobStatus.FAILED, error=f"enqueue failed: {exc}", session=session
         )
-        await ops.update_document_status(doc.id, DocumentStatus.FAILED, session=session)
+        await ops.update_document_status(doc_id, DocumentStatus.FAILED, session=session)
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE, "Could not enqueue ingestion (broker unavailable)."
         ) from exc
     refreshed = await ops.update_job_status(
         job.id, JobStatus.PENDING, task_id=task_id, session=session
     )
-    return UploadResponse(
-        document=DocumentOut.model_validate(doc),
-        job=JobOut.model_validate(refreshed or job),
+    return JobOut.model_validate(refreshed or job)
+
+
+@router.post("/documents", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
+async def upload_document(
+    file: UploadFile,
+    session: Session,
+    cfg: Cfg,
+    enqueue: Annotated[Enqueue, Depends(get_enqueue)],
+) -> UploadResponse:
+    filename, rel_path, ext = await _store_upload(file, cfg)
+    doc = await ops.create_document(
+        filename=filename,
+        content_type=ALLOWED_EXTENSIONS[ext],
+        source_path=str(rel_path),
+        session=session,
     )
+    job = await _enqueue_job(session, enqueue, doc.id)
+    return UploadResponse(document=DocumentOut.model_validate(doc), job=job)
+
+
+@router.put("/documents/{document_id}", response_model=UploadResponse)
+async def replace_document(
+    document_id: uuid.UUID,
+    file: UploadFile,
+    session: Session,
+    cfg: Cfg,
+    enqueue: Annotated[Enqueue, Depends(get_enqueue)],
+) -> UploadResponse:
+    """Upload a new version of an existing document; only changed chunks are re-embedded."""
+    existing = await ops.get_document(document_id, session=session)
+    if existing is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
+    old_source = existing.source_path
+    filename, rel_path, ext = await _store_upload(file, cfg)
+    doc = await ops.replace_document_source(
+        document_id,
+        filename=filename,
+        content_type=ALLOWED_EXTENSIONS[ext],
+        source_path=str(rel_path),
+        session=session,
+    )
+    if doc is None:  # deleted while uploading
+        _remove_upload_dir(cfg, str(rel_path))
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
+    job = await _enqueue_job(session, enqueue, doc.id)
+    _remove_upload_dir(cfg, old_source)
+    return UploadResponse(document=DocumentOut.model_validate(doc), job=job)
 
 
 @router.get("/documents", response_model=list[DocumentOut])
@@ -172,8 +217,4 @@ async def delete_document(
     source = doc.source_path
     store.delete_doc(str(document_id))
     await ops.delete_document(document_id, session=session)
-    if source:
-        parent = (cfg.data_dir / source).parent
-        # only ever remove our own per-upload directory
-        if parent.parent == cfg.data_dir / "uploads":
-            shutil.rmtree(parent, ignore_errors=True)
+    _remove_upload_dir(cfg, source)

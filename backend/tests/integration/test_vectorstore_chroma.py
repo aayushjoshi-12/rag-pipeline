@@ -62,3 +62,30 @@ def test_delete_doc_removes_chunks(chroma_store: ChromaStore) -> None:
 
     after = chroma_store.similarity_search([1.0, 0.0], top_k=10)
     assert not any(r["id"].startswith("doc-3_") for r in after)
+
+def test_explicit_ids_delete_ids_and_update_metadata(chroma_store: ChromaStore) -> None:
+    chroma_store.add_chunks(
+        "doc-9",
+        [
+            {"id": "doc-9_aaa", "text": "alpha", "metadata": {"index": 0}},
+            {"id": "doc-9_bbb", "text": "beta", "metadata": {"index": 1}},
+            {"id": "doc-9_ccc", "text": "gamma", "metadata": {"index": 2}},
+        ],
+        [[1.0, 0.0], [0.0, 1.0], [0.7, 0.7]],
+    )
+    hits = chroma_store.similarity_search([1.0, 0.0], top_k=3)
+    assert {h["id"] for h in hits} == {"doc-9_aaa", "doc-9_bbb", "doc-9_ccc"}
+
+    chroma_store.update_metadata(["doc-9_bbb"], [{"index": 7}])
+    moved = next(h for h in chroma_store.similarity_search([0.0, 1.0], top_k=3) if h["id"] == "doc-9_bbb")
+    assert moved["metadata"]["index"] == 7 and moved["metadata"]["doc_id"] == "doc-9"
+    assert moved["text"] == "beta"  # embedding and text untouched
+
+    chroma_store.delete_ids(["doc-9_aaa", "does-not-exist"])
+    assert {h["id"] for h in chroma_store.similarity_search([1.0, 0.0], top_k=3)} == {"doc-9_bbb", "doc-9_ccc"}
+    chroma_store.delete_ids([])  # no-op
+
+
+def test_update_metadata_length_mismatch_rejected(chroma_store: ChromaStore) -> None:
+    with pytest.raises(ValueError, match="equal length"):
+        chroma_store.update_metadata(["a", "b"], [{"x": 1}])

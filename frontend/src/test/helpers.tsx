@@ -20,6 +20,7 @@ export const job = (over: Partial<Job> = {}): Job => ({
   task_id: 't1',
   status: 'pending',
   error: null,
+  stats: null,
   created_at: '2026-11-13T10:00:00',
   updated_at: '2026-11-13T10:00:00',
   ...over,

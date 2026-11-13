@@ -70,6 +70,7 @@ if chat returns a 502, check `DEFAULT_LLM_MODEL` against OpenRouter's current mo
 |---|---|---|
 | POST | `/documents` | multipart upload → `{document, job}` (413 over the size limit, 415 for bad types) |
 | GET | `/documents`, `/documents/{id}`, `/documents/{id}/chunks` | list / detail with jobs / indexed chunks |
+| PUT | `/documents/{id}` | upload a new version; only changed chunks are re-embedded |
 | DELETE | `/documents/{id}` | removes the row, chunks, vectors and the stored file |
 | GET | `/jobs/{id}` | `pending → running → done \| failed` (+ error) |
 | POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
@@ -104,7 +105,23 @@ change is considered done (see the next section).
 
 Honest accounting of what has been exercised against real services versus only unit-tested:
 
-<!-- VERIFIED-TABLE -->
+| Area | How it was exercised | Result |
+|---|---|---|
+| Parse (OCR, vision, docling, txt/md) | real OpenRouter, Tesseract, docling | passed |
+| Ingest pipeline (Celery) | real worker, Postgres, Chroma, Ollama embeddings | passed |
+| Documents / jobs API | real API + worker over HTTP | passed |
+| Chat (retrieval + LLM) | real OpenRouter free model, cited answers | passed |
+| Incremental update | real stack: edit 1 paragraph of a 126-chunk doc, `PUT` → **1** chunk re-embedded, 124 reused | passed |
+| Dashboard | real Chromium driving upload → live job → chat → delete | passed |
+| Langfuse tracing | traces read back from a real Langfuse project | passed |
+| **Docker Compose, all services as containers** | `docker compose up --build`, requests through the containerised frontend | passed (Ollama must run on the host) |
+| Production frontend image (nginx) | built, served SPA routes and proxied `/api` to a live backend | passed |
+| Kubernetes manifests | rendered with `kubectl kustomize` and checked structurally by tests (references, selectors, ports, config keys) | **not applied to a cluster** — untested at runtime |
+| Auth / multi-user | not implemented | — |
+| Load / scale behaviour (HPA, many workers) | not measured | — |
+
+Smoke-test scripts and reports are kept locally under `tmp/` (gitignored); the automated suite
+(`make check`) runs 250+ backend and 24 frontend tests with fakes for external services.
 
 ## Repository map
 

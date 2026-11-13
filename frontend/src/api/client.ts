@@ -67,6 +67,11 @@ export const api = {
     form.append('file', file)
     return request<UploadResponse>('/documents', { method: 'POST', body: form })
   },
+  replace: (id: string, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<UploadResponse>(`/documents/${id}`, { method: 'PUT', body: form })
+  },
   chat: (req: ChatRequest) =>
     request<ChatResponse>('/chat', { method: 'POST', body: JSON.stringify(req) }),
 }

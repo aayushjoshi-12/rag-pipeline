@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
+import { JobTracker } from '../components/JobTracker'
 import { StatusBadge } from '../components/StatusBadge'
+import { useStore } from '../store'
 import type { Chunk, DocumentDetail } from '../types'
 
 export default function DocumentDetailPage() {
@@ -10,6 +12,11 @@ export default function DocumentDetailPage() {
   const [doc, setDoc] = useState<DocumentDetail | null>(null)
   const [chunks, setChunks] = useState<Chunk[]>([])
   const [error, setError] = useState<string | null>(null)
+  const [reload, setReload] = useState(0)
+  const [replacing, setReplacing] = useState<{ jobId: string; filename: string } | null>(null)
+  const [replaceError, setReplaceError] = useState<string | null>(null)
+  const fileInput = useRef<HTMLInputElement>(null)
+  const trackJob = useStore((st) => st.trackJob)
 
   useEffect(() => {
     let live = true
@@ -25,7 +32,7 @@ export default function DocumentDetailPage() {
     return () => {
       live = false
     }
-  }, [id])
+  }, [id, reload])
 
   if (error)
     return (
@@ -50,6 +57,50 @@ export default function DocumentDetailPage() {
       >
         Delete
       </button>
+
+      <section>
+        <h2>Upload a new version</h2>
+        <p>Only chunks whose content changed are re-embedded.</p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            const file = fileInput.current?.files?.[0]
+            if (!file) {
+              setReplaceError('Choose a file first.')
+              return
+            }
+            setReplaceError(null)
+            api
+              .replace(doc.id, file)
+              .then((res) => {
+                trackJob(res.job)
+                setReplacing({ jobId: res.job.id, filename: res.document.filename })
+              })
+              .catch((err: unknown) =>
+                setReplaceError(err instanceof Error ? err.message : String(err)),
+              )
+          }}
+        >
+          <label>
+            New version
+            <input ref={fileInput} type="file" accept=".pdf,.docx,.txt,.md" />
+          </label>
+          <button type="submit">Replace</button>
+        </form>
+        {replaceError && (
+          <p role="alert" className="error">
+            {replaceError}
+          </p>
+        )}
+        {replacing && (
+          <JobTracker
+            key={replacing.jobId}
+            jobId={replacing.jobId}
+            filename={replacing.filename}
+            onSettled={() => setReload((n) => n + 1)}
+          />
+        )}
+      </section>
 
       <h2>Jobs</h2>
       <ul>

@@ -3,12 +3,23 @@
 export type DocumentStatus = 'pending' | 'ingesting' | 'ready' | 'failed'
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed'
 
+export interface JobStats {
+  mode: 'full' | 'incremental'
+  reason: string
+  chunks_total: number
+  kept: number
+  added: number
+  removed: number
+  embedded: number
+}
+
 export interface Job {
   id: string
   document_id: string
   task_id: string | null
   status: JobStatus
   error: string | null
+  stats: JobStats | null
   created_at: string
   updated_at: string
 }
