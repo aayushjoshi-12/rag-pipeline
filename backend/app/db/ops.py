@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Sequence
 from contextlib import AsyncExitStack
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import async_session as _default_session
@@ -185,3 +185,14 @@ async def list_chunks_by_document(
             .order_by(Chunk.index)
         )
         return list(result.scalars().all())
+
+
+async def delete_chunks_by_document(
+    document_id: uuid.UUID, *, session: AsyncSession | None = None
+) -> int:
+    """Delete every chunk row of a document; returns the number removed."""
+    async with AsyncExitStack() as stack:
+        sess = await _acquire(session, stack)
+        result = await sess.execute(delete(Chunk).where(Chunk.document_id == document_id))
+        await sess.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
