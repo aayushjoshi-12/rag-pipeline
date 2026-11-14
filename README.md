@@ -130,6 +130,7 @@ Honest accounting of what has been exercised against real services versus only u
 | Dashboard | real Chromium driving upload → live job → chat → delete | passed |
 | Langfuse tracing | traces read back from a real Langfuse project | passed |
 | **Docker Compose, all services as containers** | `docker compose up --build`, requests through the containerised frontend | passed (Ollama must run on the host) |
+| Backend image size | 5.72 GB → 1.42 GB (torch removed via docling-slim; uv cache kept out of the layer); parsers + stack re-verified on the slim image | passed (auth smoke 45/47: the 2 LLM-dependent checks hit the free-tier 429) |
 | Production frontend image (nginx) | built, served SPA routes and proxied `/api` to a live backend | passed |
 | Kubernetes manifests | rendered with `kubectl kustomize` and checked structurally by tests (references, selectors, ports, config keys) | **not applied to a cluster** — untested at runtime |
 | Auth + RBAC (users, roles, permissions) | real stack through the containerised frontend: 47 checks incl. real Chromium UI flows, forged/expired/wrong-key tokens, live role edits and deactivation | passed (no login rate-limiting; no per-user document ownership; tokens are not revocable before expiry beyond deactivation) |

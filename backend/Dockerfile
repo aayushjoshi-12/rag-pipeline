@@ -5,8 +5,6 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tesseract-ocr \
-    libglib2.0-0 \
-    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
@@ -15,13 +13,14 @@ ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_HTTP_TIMEOUT=300 UV_HTTP_RETRIES=
 
 # Dependencies first (cached layer), then the project itself.
 COPY pyproject.toml uv.lock* README.md ./
-RUN uv sync --frozen --no-dev --no-install-project
+# The cache mount keeps uv's download cache out of the image layer (it was ~600 MB) and speeds rebuilds.
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev --no-install-project
 
 COPY app/ ./app/
 COPY config/ ./config/
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
-RUN uv sync --frozen --no-dev
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
 
