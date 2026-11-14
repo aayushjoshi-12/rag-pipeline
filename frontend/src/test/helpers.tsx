@@ -2,6 +2,7 @@ import { render } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import App from '../App'
 import { useStore } from '../store'
+import { useAuth } from '../store/auth'
 import type { Document, Job } from '../types'
 
 export const doc = (over: Partial<Document> = {}): Document => ({
@@ -26,7 +27,27 @@ export const job = (over: Partial<Job> = {}): Job => ({
   ...over,
 })
 
+export const ALL_PERMISSIONS = [
+  'documents:read',
+  'documents:write',
+  'documents:delete',
+  'jobs:read',
+  'chat:use',
+  'users:manage',
+  'roles:manage',
+]
+
+/** Signed in as ``email`` holding ``permissions`` (default: everything). */
+export function signInAs(permissions: string[] = ALL_PERMISSIONS, email = 'admin@example.test') {
+  useAuth.setState({
+    status: 'authenticated',
+    error: null,
+    me: { id: 'u1', email, permissions, auth_enabled: true },
+  })
+}
+
 export function resetStore() {
+  signInAs()
   useStore.setState({
     documents: [],
     jobs: {},

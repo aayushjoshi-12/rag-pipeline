@@ -4,11 +4,14 @@ import { api } from '../api/client'
 import { JobTracker } from '../components/JobTracker'
 import { StatusBadge } from '../components/StatusBadge'
 import { useStore } from '../store'
+import { useCan } from '../store/auth'
 import type { Chunk, DocumentDetail } from '../types'
 
 export default function DocumentDetailPage() {
   const { id = '' } = useParams()
   const navigate = useNavigate()
+  const canWrite = useCan('documents:write')
+  const canDelete = useCan('documents:delete')
   const [doc, setDoc] = useState<DocumentDetail | null>(null)
   const [chunks, setChunks] = useState<Chunk[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -49,58 +52,62 @@ export default function DocumentDetailPage() {
       </p>
       <h1>{doc.filename}</h1>
       <StatusBadge status={doc.status} />
-      <button
-        onClick={() => {
-          if (window.confirm(`Delete ${doc.filename}?`))
-            void api.deleteDocument(doc.id).then(() => navigate('/documents'))
-        }}
-      >
-        Delete
-      </button>
-
-      <section>
-        <h2>Upload a new version</h2>
-        <p>Only chunks whose content changed are re-embedded.</p>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault()
-            const file = fileInput.current?.files?.[0]
-            if (!file) {
-              setReplaceError('Choose a file first.')
-              return
-            }
-            setReplaceError(null)
-            api
-              .replace(doc.id, file)
-              .then((res) => {
-                trackJob(res.job)
-                setReplacing({ jobId: res.job.id, filename: res.document.filename })
-              })
-              .catch((err: unknown) =>
-                setReplaceError(err instanceof Error ? err.message : String(err)),
-              )
+      {canDelete && (
+        <button
+          onClick={() => {
+            if (window.confirm(`Delete ${doc.filename}?`))
+              void api.deleteDocument(doc.id).then(() => navigate('/documents'))
           }}
         >
-          <label>
-            New version
-            <input ref={fileInput} type="file" accept=".pdf,.docx,.txt,.md" />
-          </label>
-          <button type="submit">Replace</button>
-        </form>
-        {replaceError && (
-          <p role="alert" className="error">
-            {replaceError}
-          </p>
-        )}
-        {replacing && (
-          <JobTracker
-            key={replacing.jobId}
-            jobId={replacing.jobId}
-            filename={replacing.filename}
-            onSettled={() => setReload((n) => n + 1)}
-          />
-        )}
-      </section>
+          Delete
+        </button>
+      )}
+
+      {canWrite && (
+        <section>
+          <h2>Upload a new version</h2>
+          <p>Only chunks whose content changed are re-embedded.</p>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              const file = fileInput.current?.files?.[0]
+              if (!file) {
+                setReplaceError('Choose a file first.')
+                return
+              }
+              setReplaceError(null)
+              api
+                .replace(doc.id, file)
+                .then((res) => {
+                  trackJob(res.job)
+                  setReplacing({ jobId: res.job.id, filename: res.document.filename })
+                })
+                .catch((err: unknown) =>
+                  setReplaceError(err instanceof Error ? err.message : String(err)),
+                )
+            }}
+          >
+            <label>
+              New version
+              <input ref={fileInput} type="file" accept=".pdf,.docx,.txt,.md" />
+            </label>
+            <button type="submit">Replace</button>
+          </form>
+          {replaceError && (
+            <p role="alert" className="error">
+              {replaceError}
+            </p>
+          )}
+          {replacing && (
+            <JobTracker
+              key={replacing.jobId}
+              jobId={replacing.jobId}
+              filename={replacing.filename}
+              onSettled={() => setReload((n) => n + 1)}
+            />
+          )}
+        </section>
+      )}
 
       <h2>Jobs</h2>
       <ul>

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.db import ops
 from app.db.enums import DocumentStatus, JobStatus
+from app.routers.auth_deps import require
 from app.routers.deps import Enqueue, get_enqueue, get_session, get_settings, get_store
 from app.schema.documents import (
     ChunkOut,
@@ -24,6 +25,7 @@ from app.schema.documents import (
     JobOut,
     UploadResponse,
 )
+from app.services.auth.permissions import Permission
 from app.services.vectorstore import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -122,7 +124,7 @@ async def _enqueue_job(
     return JobOut.model_validate(refreshed or job)
 
 
-@router.post("/documents", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/documents", response_model=UploadResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))])
 async def upload_document(
     file: UploadFile,
     session: Session,
@@ -140,7 +142,7 @@ async def upload_document(
     return UploadResponse(document=DocumentOut.model_validate(doc), job=job)
 
 
-@router.put("/documents/{document_id}", response_model=UploadResponse)
+@router.put("/documents/{document_id}", response_model=UploadResponse, dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))])
 async def replace_document(
     document_id: uuid.UUID,
     file: UploadFile,
@@ -169,14 +171,14 @@ async def replace_document(
     return UploadResponse(document=DocumentOut.model_validate(doc), job=job)
 
 
-@router.get("/documents", response_model=list[DocumentOut])
+@router.get("/documents", response_model=list[DocumentOut], dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
 async def list_documents(session: Session, skip: int = 0, limit: int = 100) -> list[DocumentOut]:
     limit = max(1, min(limit, 500))
     docs = await ops.list_documents(skip=max(0, skip), limit=limit, session=session)
     return [DocumentOut.model_validate(d) for d in docs]
 
 
-@router.get("/documents/{document_id}", response_model=DocumentDetail)
+@router.get("/documents/{document_id}", response_model=DocumentDetail, dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
 async def get_document(document_id: uuid.UUID, session: Session) -> DocumentDetail:
     doc = await ops.get_document(document_id, session=session)
     if doc is None:
@@ -188,7 +190,7 @@ async def get_document(document_id: uuid.UUID, session: Session) -> DocumentDeta
     )
 
 
-@router.get("/documents/{document_id}/chunks", response_model=list[ChunkOut])
+@router.get("/documents/{document_id}/chunks", response_model=list[ChunkOut], dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
 async def list_chunks(document_id: uuid.UUID, session: Session) -> list[ChunkOut]:
     if await ops.get_document(document_id, session=session) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
@@ -196,7 +198,7 @@ async def list_chunks(document_id: uuid.UUID, session: Session) -> list[ChunkOut
     return [ChunkOut(id=r.id, index=r.index, text=r.text, metadata=dict(r.metadata_)) for r in rows]
 
 
-@router.get("/jobs/{job_id}", response_model=JobOut)
+@router.get("/jobs/{job_id}", response_model=JobOut, dependencies=[Depends(require(Permission.JOBS_READ))])
 async def get_job(job_id: uuid.UUID, session: Session) -> JobOut:
     job = await ops.get_job(job_id, session=session)
     if job is None:
@@ -204,7 +206,7 @@ async def get_job(job_id: uuid.UUID, session: Session) -> JobOut:
     return JobOut.model_validate(job)
 
 
-@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require(Permission.DOCUMENTS_DELETE))])
 async def delete_document(
     document_id: uuid.UUID,
     session: Session,

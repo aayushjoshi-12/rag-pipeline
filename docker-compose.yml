@@ -10,6 +10,11 @@ x-backend-env: &backend-env
   # Ollama runs on the host (see README); host.docker.internal reaches it from the containers.
   OLLAMA_BASE_URL: ${OLLAMA_DOCKER_URL:-http://host.docker.internal:11434}
   DATA_DIR: /app/data
+  # Auth: values come from the shell or .env (never hard-coded here).
+  AUTH_ENABLED: ${AUTH_ENABLED:-true}
+  SECRET_KEY: ${SECRET_KEY:-}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
 
 x-backend: &backend
   # One tag shared by api/worker/beat/migrate so Compose builds the backend image once.

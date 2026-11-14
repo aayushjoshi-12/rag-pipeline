@@ -77,3 +77,57 @@ export interface HealthResponse {
   status: 'ok' | 'degraded'
   checks: Record<string, HealthCheck>
 }
+
+export interface TokenPair {
+  access_token: string
+  refresh_token: string
+  token_type: string
+  expires_in: number
+}
+
+export interface Me {
+  id: string | null
+  email: string
+  permissions: string[]
+  auth_enabled: boolean
+}
+
+export interface Role {
+  id: string
+  name: string
+  description: string
+  is_builtin: boolean
+  permissions: string[]
+}
+
+export interface RoleInput {
+  name?: string
+  description?: string
+  permissions?: string[]
+}
+
+export interface ManagedUser {
+  id: string
+  email: string
+  is_active: boolean
+  roles: string[]
+  permissions: string[]
+}
+
+export interface UserCreateInput {
+  email: string
+  password: string
+  role_ids: string[]
+  is_active?: boolean
+}
+
+export interface UserUpdateInput {
+  password?: string
+  is_active?: boolean
+  role_ids?: string[]
+}
+
+export interface PermissionInfo {
+  name: string
+  description: string
+}

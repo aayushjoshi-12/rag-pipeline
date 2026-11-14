@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.observability import log_context
+from app.routers.auth_deps import require
 from app.routers.deps import (
     get_embedder_dep,
     get_llm_dep,
@@ -18,6 +19,7 @@ from app.routers.deps import (
 )
 from app.schema.chat import ChatRequest, ChatResponse, SourceOut
 from app.services import observability
+from app.services.auth.permissions import Permission
 from app.services.embeddings import Embedder
 from app.services.llm import LLM, LLMConfigError, LLMRequestError, LLMUnavailableError
 from app.services.qa import answer_question
@@ -28,7 +30,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(require(Permission.CHAT_USE))])
 async def chat(
     req: ChatRequest,
     session: Annotated[AsyncSession, Depends(get_session)],

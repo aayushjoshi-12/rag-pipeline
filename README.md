@@ -27,6 +27,10 @@ question ─► API ─► embed query ─► Chroma similarity ─► LLM (grou
 - **Observe** — Langfuse spans for every ingest stage and chat request; prompt/question content is
   only sent when `LANGFUSE_CAPTURE_CONTENT=true`. Structured JSON logs carry `job_id` / `chat_id`.
 - **Dashboard** — upload with live job status, document list/detail with chunks, chat with citations.
+- **Access control** — JWT login with role-based access: admins define roles as sets of permissions
+  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `users:manage`, `roles:manage`) and assign
+  them to users. Permissions are checked server-side on every request and re-read from the database,
+  so editing a role or deactivating a user takes effect immediately.
 - **Housekeeping** — a Celery beat task removes orphaned upload directories.
 
 ## Quick start (Docker Compose)
@@ -36,11 +40,15 @@ Requires Docker and [Ollama](https://ollama.com) on the host (embeddings), plus 
 
 ```bash
 ollama pull mxbai-embed-large
-cp .env.example .env            # set OPENROUTER_API_KEY; single-quote values containing special chars
+cp .env.example .env            # set OPENROUTER_API_KEY, SECRET_KEY, ADMIN_EMAIL, ADMIN_PASSWORD
+                                # (single-quote values containing special characters)
 docker compose up -d --build    # db, redis, chroma, migrate (one-shot), api, worker, beat, frontend
 ```
 
 - Dashboard: http://localhost:5173 &nbsp;·&nbsp; API docs: http://localhost:8000/docs
+- Sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` (the first admin is created only while there are no
+  users). Locked out? `docker compose exec api python -m app.manage create-admin --email you@example.com`.
+  `AUTH_ENABLED=false` disables login entirely (every request is an admin) — demos only.
 
 Inside the containers the service hostnames (`db`, `redis`, `chroma`) and the host Ollama
 (`host.docker.internal`) override whatever `.env` says, so the same `.env` works for host-run
@@ -67,8 +75,13 @@ if chat returns a 502, check `DEFAULT_LLM_MODEL` against OpenRouter's current mo
 
 ## API
 
+All routes except `/health` and `/auth/login|refresh` need a bearer token with the listed permission.
+
 | Method | Path | Purpose |
 |---|---|---|
+| POST | `/auth/login`, `/auth/refresh` | email + password → access/refresh tokens; refresh |
+| GET | `/auth/me` | who am I + effective permissions |
+| GET/POST/PATCH/DELETE | `/users`, `/roles` (`GET /permissions`) | admin: manage users, roles and their permissions (`users:manage`, `roles:manage`) |
 | POST | `/documents` | multipart upload → `{document, job}` (413 over the size limit, 415 for bad types) |
 | GET | `/documents`, `/documents/{id}`, `/documents/{id}/chunks` | list / detail with jobs / indexed chunks |
 | PUT | `/documents/{id}` | upload a new version; only changed chunks are re-embedded |
@@ -89,7 +102,7 @@ make deploy-dry ENV=prod                                      # render only
 make deploy ENV=dev                                           # delete+apply migrate job, apply, wait
 ```
 
-Things you must provide: real values in `k8s/base/secrets.yaml` (use sealed-secrets/SOPS), image
+Things you must provide: real values in `k8s/base/secrets.yaml` (including a random `SECRET_KEY` of 32+ characters — the API refuses to start in prod with a placeholder — and the bootstrap `ADMIN_*`) (use sealed-secrets/SOPS), image
 tags in the overlay, an ingress host/class, and a **ReadWriteMany** storage class for the uploads
 volume when running more than one API/worker replica (the API writes files the workers read).
 
@@ -118,7 +131,7 @@ Honest accounting of what has been exercised against real services versus only u
 | **Docker Compose, all services as containers** | `docker compose up --build`, requests through the containerised frontend | passed (Ollama must run on the host) |
 | Production frontend image (nginx) | built, served SPA routes and proxied `/api` to a live backend | passed |
 | Kubernetes manifests | rendered with `kubectl kustomize` and checked structurally by tests (references, selectors, ports, config keys) | **not applied to a cluster** — untested at runtime |
-| Auth / multi-user | not implemented | — |
+| Auth + RBAC (users, roles, permissions) | real stack through the containerised frontend: 47 checks incl. real Chromium UI flows, forged/expired/wrong-key tokens, live role edits and deactivation | passed (no login rate-limiting; no per-user document ownership; tokens are not revocable before expiry beyond deactivation) |
 | Load / scale behaviour (HPA, many workers) | not measured | — |
 
 Smoke-test scripts and reports are kept locally under `tmp/` (gitignored); the automated suite

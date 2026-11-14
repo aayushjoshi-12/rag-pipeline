@@ -50,7 +50,7 @@ async def client(
     db_session: AsyncSession, tmp_path: Path
 ) -> AsyncIterator[tuple[httpx.AsyncClient, Harness, Path]]:
     h = Harness()
-    cfg = Settings(data_dir=tmp_path, max_upload_size_bytes=2048)
+    cfg = Settings(data_dir=tmp_path, max_upload_size_bytes=2048, auth_enabled=False)
 
     def enqueue(job_id: str) -> str:
         if h.fail_enqueue:

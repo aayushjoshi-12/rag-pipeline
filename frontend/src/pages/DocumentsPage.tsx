@@ -3,9 +3,12 @@ import { Link } from 'react-router-dom'
 import { StatusBadge } from '../components/StatusBadge'
 import { UploadForm } from '../components/UploadForm'
 import { useStore } from '../store'
+import { useCan } from '../store/auth'
 
 export default function DocumentsPage() {
   const { documents, loading, error, refreshDocuments, removeDocument } = useStore()
+  const canWrite = useCan('documents:write')
+  const canDelete = useCan('documents:delete')
   useEffect(() => {
     void refreshDocuments()
   }, [refreshDocuments])
@@ -13,7 +16,7 @@ export default function DocumentsPage() {
   return (
     <div>
       <h1>Documents</h1>
-      <UploadForm />
+      {canWrite && <UploadForm />}
       {error && (
         <p role="alert" className="error">
           {error}
@@ -22,7 +25,7 @@ export default function DocumentsPage() {
       {loading && documents.length === 0 ? (
         <p>Loading…</p>
       ) : documents.length === 0 ? (
-        <p>No documents yet — upload one above.</p>
+        <p>No documents yet{canWrite ? ' — upload one above.' : '.'}</p>
       ) : (
         <table>
           <thead>
@@ -44,14 +47,16 @@ export default function DocumentsPage() {
                 </td>
                 <td>{new Date(d.created_at).toLocaleString()}</td>
                 <td>
-                  <button
-                    aria-label={`delete ${d.filename}`}
-                    onClick={() => {
-                      if (window.confirm(`Delete ${d.filename}?`)) void removeDocument(d.id)
-                    }}
-                  >
-                    Delete
-                  </button>
+                  {canDelete && (
+                    <button
+                      aria-label={`delete ${d.filename}`}
+                      onClick={() => {
+                        if (window.confirm(`Delete ${d.filename}?`)) void removeDocument(d.id)
+                      }}
+                    >
+                      Delete
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

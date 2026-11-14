@@ -6,8 +6,17 @@ import type {
   DocumentDetail,
   HealthResponse,
   Job,
+  ManagedUser,
+  Me,
+  PermissionInfo,
+  Role,
+  RoleInput,
+  TokenPair,
   UploadResponse,
+  UserCreateInput,
+  UserUpdateInput,
 } from '../types'
+import { clearTokens, getTokens, notifySessionLost, setTokens } from '../auth/session'
 
 export const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -18,12 +27,6 @@ export class ApiError extends Error {
     this.name = 'ApiError'
     this.status = status
   }
-}
-
-let authToken: string | null = null
-/** Bearer-ready: set a token and every request carries it. */
-export function setAuthToken(token: string | null): void {
-  authToken = token
 }
 
 async function errorMessage(res: Response): Promise<string> {
@@ -39,16 +42,56 @@ async function errorMessage(res: Response): Promise<string> {
   return res.statusText || `HTTP ${res.status}`
 }
 
-/** The single request path: every API call goes through here, so errors are uniform. */
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+let refreshing: Promise<boolean> | null = null
+
+/** Exchange the refresh token for a new pair. Concurrent callers share one attempt. */
+function refreshSession(): Promise<boolean> {
+  if (refreshing) return refreshing
+  const tokens = getTokens()
+  if (!tokens) return Promise.resolve(false)
+  refreshing = (async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: tokens.refresh }),
+      })
+      if (!res.ok) return false
+      const pair = (await res.json()) as TokenPair
+      setTokens({ access: pair.access_token, refresh: pair.refresh_token })
+      return true
+    } catch {
+      return false
+    } finally {
+      refreshing = null
+    }
+  })()
+  return refreshing
+}
+
+async function send(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers)
-  if (authToken) headers.set('Authorization', `Bearer ${authToken}`)
+  const tokens = getTokens()
+  if (tokens) headers.set('Authorization', `Bearer ${tokens.access}`)
   if (typeof init.body === 'string') headers.set('Content-Type', 'application/json')
-  let res: Response
   try {
-    res = await fetch(`${BASE_URL}${path}`, { ...init, headers })
+    return await fetch(`${BASE_URL}${path}`, { ...init, headers })
   } catch (e) {
     throw new ApiError(0, e instanceof Error ? `Network error: ${e.message}` : 'Network error')
+  }
+}
+
+/** The single request path: every API call goes through here, so errors are uniform.
+ * A 401 triggers one token refresh and one retry; if that fails the session is dropped. */
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  let res = await send(path, init)
+  if (res.status === 401 && !path.startsWith('/auth/') && getTokens()) {
+    if (await refreshSession()) {
+      res = await send(path, init)
+    } else {
+      clearTokens()
+      notifySessionLost()
+    }
   }
   if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
   if (res.status === 204) return undefined as T
@@ -57,6 +100,25 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const api = {
   health: () => request<HealthResponse>('/health'),
+  login: (email: string, password: string) =>
+    request<TokenPair>('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ email, password }),
+    }),
+  me: () => request<Me>('/auth/me'),
+  listPermissions: () => request<PermissionInfo[]>('/permissions'),
+  listUsers: () => request<ManagedUser[]>('/users'),
+  createUser: (input: UserCreateInput) =>
+    request<ManagedUser>('/users', { method: 'POST', body: JSON.stringify(input) }),
+  updateUser: (id: string, input: UserUpdateInput) =>
+    request<ManagedUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+  listRoles: () => request<Role[]>('/roles'),
+  createRole: (input: RoleInput) =>
+    request<Role>('/roles', { method: 'POST', body: JSON.stringify(input) }),
+  updateRole: (id: string, input: RoleInput) =>
+    request<Role>(`/roles/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
+  deleteRole: (id: string) => request<void>(`/roles/${id}`, { method: 'DELETE' }),
   listDocuments: () => request<Document[]>('/documents'),
   getDocument: (id: string) => request<DocumentDetail>(`/documents/${id}`),
   listChunks: (id: string) => request<Chunk[]>(`/documents/${id}/chunks`),

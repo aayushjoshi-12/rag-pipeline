@@ -133,7 +133,7 @@ async def test_chat_emits_spans(db_session: AsyncSession, rec: Recorder) -> None
         yield db_session
 
     app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: Settings()
+    app.dependency_overrides[deps.get_settings] = lambda: Settings(auth_enabled=False)
     app.dependency_overrides[deps.get_embedder_dep] = lambda: Embedder()
     app.dependency_overrides[deps.get_store] = lambda: Store()
     app.dependency_overrides[deps.get_llm_dep] = lambda: LLM()

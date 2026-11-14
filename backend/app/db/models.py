@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import JSON, ForeignKey, String, Text, func
+from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -94,3 +94,53 @@ class Job(Base):
 
     def __repr__(self) -> str:
         return f"<Job {self.status} document_id={self.document_id}>"
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(256))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+
+    roles: Mapped[list[Role]] = relationship(
+        secondary="user_roles", back_populates="users", lazy="selectin"
+    )
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    name: Mapped[str] = mapped_column(String(64), unique=True)
+    description: Mapped[str] = mapped_column(String(256), default="")
+    is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    permissions: Mapped[list[RolePermission]] = relationship(
+        back_populates="role", cascade="all, delete-orphan", lazy="selectin"
+    )
+    users: Mapped[list[User]] = relationship(secondary="user_roles", back_populates="roles")
+
+
+class RolePermission(Base):
+    __tablename__ = "role_permissions"
+    __table_args__ = (UniqueConstraint("role_id", "permission"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id", ondelete="CASCADE"))
+    permission: Mapped[str] = mapped_column(String(64))
+
+    role: Mapped[Role] = relationship(back_populates="permissions")
+
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
+    role_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("roles.id", ondelete="RESTRICT"), primary_key=True
+    )

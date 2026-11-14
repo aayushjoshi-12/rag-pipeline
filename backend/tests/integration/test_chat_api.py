@@ -112,7 +112,7 @@ async def chat_client(db_session: AsyncSession) -> AsyncIterator[Any]:
         yield db_session
 
     app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: Settings(default_top_k=4)
+    app.dependency_overrides[deps.get_settings] = lambda: Settings(default_top_k=4, auth_enabled=False)
     app.dependency_overrides[deps.get_embedder_dep] = lambda: FakeEmbedder()
     app.dependency_overrides[deps.get_store] = lambda: state["store"]
     app.dependency_overrides[deps.get_llm_dep] = lambda: state["llm"]

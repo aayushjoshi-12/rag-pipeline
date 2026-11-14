@@ -41,6 +41,8 @@ def _selected_environment() -> str | None:
     return rag_env if rag_env in _VALID_ENVIRONMENTS else None
 
 
+_PLACEHOLDER_KEYS: frozenset[str] = frozenset({"change-me", "replace-me", "changeme", "secret"})
+
 #: Fields that are secrets and must NEVER appear in config/config.<env>.json.
 SECRET_FIELD_NAMES: frozenset[str] = frozenset(
     {
@@ -49,6 +51,7 @@ SECRET_FIELD_NAMES: frozenset[str] = frozenset(
         "anthropic_api_key",
         "database_url",
         "secret_key",
+        "admin_password",
         "langfuse_public_key",
         "langfuse_secret_key",
     }
@@ -164,6 +167,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     port: int = 8000
     secret_key: str = ""
+    # ── Auth / RBAC ──────────────────────────────────────────────────────────
+    auth_enabled: bool = True
+    access_token_minutes: int = 30
+    refresh_token_days: int = 7
+    #: First-admin bootstrap (only used when no users exist yet).
+    admin_email: str = ""
+    admin_password: str = ""
     data_dir: Path = Path("data")
     max_upload_size_bytes: int = 25 * 1024 * 1024
     cleanup_orphan_age_hours: float = 24.0
@@ -233,6 +243,15 @@ class Settings(BaseSettings):
             raise SettingsError(f"Unknown parser provider '{self.parser_provider}'.")
         if self.docx_reader not in ("docling",):
             raise SettingsError(f"Unknown DOCX reader '{self.docx_reader}'.")
+        if self.access_token_minutes <= 0 or self.refresh_token_days <= 0:
+            raise SettingsError("token lifetimes must be positive.")
+        weak_key = len(self.secret_key) < 32 or self.secret_key.lower() in _PLACEHOLDER_KEYS
+        if self.auth_enabled and self.rag_env != "dev" and weak_key:
+            raise SettingsError(
+                "SECRET_KEY must be a real random value of at least 32 characters when "
+                "AUTH_ENABLED=true outside dev (e.g. `python -c 'import secrets;"
+                "print(secrets.token_urlsafe(48))'`)."
+            )
         if self.cleanup_orphan_age_hours < 0:
             raise SettingsError("cleanup_orphan_age_hours must be >= 0.")
         self._warn_langfuse()
