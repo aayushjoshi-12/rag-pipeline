@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
+import uuid
 import zipfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import psycopg
 import pytest
 
 # Tests must never read a developer's real .env (API keys, provider choices): that would make
@@ -17,6 +21,7 @@ import pytest
 os.environ["RAG_ENV_FILE"] = os.devnull
 
 from app.config import Settings
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -73,18 +78,57 @@ def synthetic_docx(tmp_path: Path) -> Path:
     return path
 
 
+"""Throwaway migrated database so tests never touch the developer's real ``rag`` database."""
+
+_BACKEND = Path(__file__).resolve().parents[1]
+
+
+def _admin_dsn(url: str) -> tuple[str, str]:
+    parsed = make_url(url)
+    dsn = parsed.set(drivername="postgresql", database="postgres").render_as_string(
+        hide_password=False
+    )
+    return dsn, parsed.database or "rag"
+
+
+@pytest.fixture(scope="module")
+def isolated_db_url() -> Iterator[str]:
+    base = Settings().database_url
+    admin_dsn, _ = _admin_dsn(base)
+    name = f"rag_test_{uuid.uuid4().hex[:12]}"
+    try:
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute(f'CREATE DATABASE "{name}"')
+    except psycopg.OperationalError as exc:  # pragma: no cover - environment dependent
+        pytest.skip(f"Postgres not reachable for isolated DB tests: {exc}")
+    url = make_url(base).set(database=name).render_as_string(hide_password=False)
+    env = {**os.environ, "DATABASE_URL": url, "RAG_ENV_FILE": os.devnull}
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
+        cwd=_BACKEND,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        assert result.returncode == 0, f"alembic failed:\n{result.stdout}\n{result.stderr}"
+        yield url
+    finally:
+        with psycopg.connect(admin_dsn, autocommit=True) as conn:
+            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')
+
+
 @pytest.fixture
-async def db_session() -> AsyncIterator[AsyncSession]:
-    """Yield an async session for integration tests.
+async def db_session(isolated_db_url: str) -> AsyncIterator[AsyncSession]:
+    """Yield an async session on the throwaway database (see ``isolated_db_url``).
 
     Creates a fresh engine with NullPool per test to avoid event-loop
     conflicts across pytest-asyncio test functions.
 
-    Prereq: compose Postgres must be up and migrated (make db-up && make migrate).
+    Prereq: compose Postgres reachable (make db-up); the DB is migrated automatically.
     """
-    settings = Settings()
     engine = create_async_engine(
-        settings.database_url,
+        isolated_db_url,
         echo=False,
         poolclass=NullPool,
     )
