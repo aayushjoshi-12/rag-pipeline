@@ -29,7 +29,11 @@ The parser is original code in this repo (`backend/app/services/`), behind one s
 | Tracing | `services/observability.py` | Langfuse generation spans around LLM calls (content capture opt-in) |
 | Backend factory | `services/backends/__init__.py` | `get_parser_backend(provider, settings)`; missing keys raise, never silently fall back |
 
-**DOCX → markdown via docling** (layout-aware, tables rendered as markdown), not raw text.
+**DOCX → markdown via docling's Word backend** (tables rendered as markdown), not raw text. Only
+`docling-slim[format-docx,format-pdf-pypdfium2]` is installed and the backend is called directly
+(`MsWordDocumentBackend`): DOCX conversion is an XML → document transform and needs no OCR or
+layout models. The full `docling` package (and `DocumentConverter`, which imports the OCR/layout
+pipelines) would pull in torch and several GB for nothing.
 
 Explored alternatives for DOCX: `mammoth` (docx→HTML, extra conversion step, weaker on tables),
 `markitdown` (lighter, weaker layout), `unstructured` (heavy, PDF parsing historically flaky).
@@ -87,8 +91,8 @@ extraction), gated on cost data.
 ## Consequences
 
 - The worker's `parse` step composes: **PDF** → image pages → OCR or vision LLM text; **DOCX**
-  → docling → markdown; both → a common `ParseResult` (see `app/services/parser.py` seam).
-- New deps: `docling`, `pytesseract`, `Pillow`(+), keep `pymupdf`; `python-docx` drops out.
+  → docling Word backend → markdown; both → a common `ParseResult` (see `app/services/parser.py` seam).
+- New deps: `docling-slim[format-docx,format-pdf-pypdfium2]`, `pytesseract`, `Pillow`(+), keep `pymupdf`; `python-docx` drops out.
 
 ## Future option (not decided)
 

@@ -115,10 +115,18 @@ def _parse_docx(path: Path, cfg: Settings) -> ParseResult:
     if cfg.docx_reader != "docling":
         raise DocumentLoadError(f"Unknown DOCX reader '{cfg.docx_reader}'. Supported: docling.")
     try:
-        from docling.document_converter import DocumentConverter
+        # Use docling's Word backend directly (an XML → document converter) rather than
+        # DocumentConverter, which also imports the OCR/layout-model pipelines (torch, scipy…)
+        # that DOCX conversion never uses.
+        from docling.backend.msword_backend import MsWordDocumentBackend
+        from docling.datamodel.base_models import InputFormat
+        from docling.datamodel.document import InputDocument
 
-        result = DocumentConverter().convert(path)
-        markdown = result.document.export_to_markdown()
+        in_doc = InputDocument(
+            path_or_stream=path, format=InputFormat.DOCX, backend=MsWordDocumentBackend
+        )
+        backend = MsWordDocumentBackend(in_doc=in_doc, path_or_stream=path)
+        markdown = backend.convert().export_to_markdown()
     except Exception as exc:
         raise DocumentLoadError(f"Failed to convert DOCX {path} with docling: {exc}") from exc
 

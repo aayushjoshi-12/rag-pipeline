@@ -16,7 +16,8 @@ question ─► API ─► embed query ─► Chroma similarity ─► LLM (grou
 - **Ingest** — `POST /documents` (pdf, docx, txt, md). The API only stores the file and enqueues a
   job; a worker does the heavy lifting and reports status you can poll (`GET /jobs/{id}`).
 - **Parse** — PDFs are rendered to page images and read by a vision LLM (OpenRouter / OpenAI /
-  Anthropic) or Tesseract OCR; DOCX goes through docling to markdown. Provider, model, system
+  Anthropic) or Tesseract OCR; DOCX goes through docling's Word backend
+  to markdown (no ML models). Provider, model, system
   prompt, DPI, OCR language and timeouts are all config ([ADR-0002](docs/adr/0002-document-parsing.md)).
 - **Chunk** — content-defined chunking (rolling hash), so editing one paragraph leaves the other
   chunks — and their SHA-256 hashes — unchanged ([ADR-0003](docs/adr/0003-chunking.md)).
@@ -107,7 +108,7 @@ Honest accounting of what has been exercised against real services versus only u
 
 | Area | How it was exercised | Result |
 |---|---|---|
-| Parse (OCR, vision, docling, txt/md) | real OpenRouter, Tesseract, docling | passed |
+| Parse (OCR, vision, DOCX, txt/md) | real OpenRouter, Tesseract, docling Word backend | passed |
 | Ingest pipeline (Celery) | real worker, Postgres, Chroma, Ollama embeddings | passed |
 | Documents / jobs API | real API + worker over HTTP | passed |
 | Chat (retrieval + LLM) | real OpenRouter free model, cited answers | passed |
