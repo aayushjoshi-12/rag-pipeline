@@ -76,7 +76,8 @@ export interface Source {
   document_id: string
   chunk_index: number
   filename: string
-  score: number
+  /** Null for context chunks (`is_hit` false): they are not scored and never borrow their hit's score. */
+  score: number | null
   /** Absent on older servers (then `score` is a distance). Scores are not comparable across kinds. */
   score_kind?: ScoreKind | (string & {})
   /** Hybrid only: 1-based rank in the semantic / keyword candidate list, null when absent there. */
@@ -84,6 +85,10 @@ export interface Source {
   keyword_rank?: number | null
   /** False for neighbouring context chunks (absent on older servers: treat as a hit). */
   is_hit?: boolean
+  /** 1-based position among the hits, best first; null/absent for context chunks. */
+  rank?: number | null
+  /** Context chunks only: the hit (document_id, chunk_index) this chunk accompanies. */
+  context_for?: { document_id: string; chunk_index: number } | null
 }
 
 export interface ChatResponse {
@@ -158,7 +163,7 @@ export interface PermissionInfo {
 export interface Trace {
   id: string
   created_at: string
-  kind: 'chat' | 'ingest'
+  kind: 'chat' | 'search' | 'ingest'
   status: 'ok' | 'error'
   duration_ms: number
   user_email: string | null

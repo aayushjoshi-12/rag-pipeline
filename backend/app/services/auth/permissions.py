@@ -15,6 +15,7 @@ class Permission(StrEnum):
     DOCUMENTS_DELETE = "documents:delete"
     JOBS_READ = "jobs:read"
     CHAT_USE = "chat:use"
+    SEARCH_USE = "search:use"
     TRACES_READ = "traces:read"
     USERS_MANAGE = "users:manage"
     ROLES_MANAGE = "roles:manage"
@@ -26,6 +27,7 @@ DESCRIPTIONS: dict[Permission, str] = {
     Permission.DOCUMENTS_DELETE: "Delete documents",
     Permission.JOBS_READ: "View ingest job status",
     Permission.CHAT_USE: "Ask questions (chat)",
+    Permission.SEARCH_USE: "Search documents and get ranked passages (no LLM)",
     Permission.TRACES_READ: "View request traces and usage statistics",
     Permission.USERS_MANAGE: "Create, edit and deactivate users",
     Permission.ROLES_MANAGE: "Create, edit and delete roles",
@@ -46,12 +48,15 @@ BUILTIN_ROLES: dict[str, tuple[str, frozenset[Permission]]] = {
                 Permission.DOCUMENTS_WRITE,
                 Permission.JOBS_READ,
                 Permission.CHAT_USE,
+                Permission.SEARCH_USE,
             }
         ),
     ),
     VIEWER_ROLE: (
         "Read documents and chat",
-        frozenset({Permission.DOCUMENTS_READ, Permission.JOBS_READ, Permission.CHAT_USE}),
+        frozenset(
+            {Permission.DOCUMENTS_READ, Permission.JOBS_READ, Permission.CHAT_USE, Permission.SEARCH_USE}
+        ),
     ),
 }
 

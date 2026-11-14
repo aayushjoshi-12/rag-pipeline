@@ -15,7 +15,7 @@ from app.db.models import Trace
 
 logger = logging.getLogger(__name__)
 
-KINDS = ("chat", "ingest")
+KINDS = ("chat", "search", "ingest")
 STATUSES = ("ok", "error")
 
 

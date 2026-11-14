@@ -33,6 +33,14 @@ describe('requestOverrides', () => {
   })
 })
 
+describe('scoreLabel for context chunks', () => {
+  it('never prints a number for an unscored chunk', () => {
+    const l = scoreLabel({ score: null, score_kind: 'rrf' })
+    expect(l.text).toBe('not scored')
+    expect(l.text).not.toMatch(/\d/)
+  })
+})
+
 describe('scoreLabel', () => {
   it.each([
     ['distance', 0.4213, 'distance 0.42', /lower is closer/],

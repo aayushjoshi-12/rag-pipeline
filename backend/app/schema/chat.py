@@ -18,13 +18,21 @@ class ChatRequest(BaseModel):
     fusion: Literal["rrf", "weighted"] | None = None
 
 
+class ChunkRef(BaseModel):
+    """Identifies one chunk: the hit that a context chunk accompanies."""
+
+    document_id: uuid.UUID
+    chunk_index: int
+
+
 class SourceOut(BaseModel):
     text: str
     document_id: uuid.UUID
     chunk_index: int
     filename: str
-    #: Meaning depends on ``score_kind``; sources are always ordered best first.
-    score: float
+    #: Meaning depends on ``score_kind``. Among the hits (``is_hit``) the order is best first.
+    #: ``null`` for context chunks (``is_hit`` false): they were not scored and never borrow their hit's score.
+    score: float | None
     #: ``distance`` (lower = closer; semantic) | ``bm25`` | ``ts_rank_cd`` | ``rrf`` | ``weighted`` (higher = better).
     score_kind: str = "distance"
     #: Hybrid only: 1-based rank in the semantic / keyword candidate list (None = not in that list).
@@ -32,8 +40,14 @@ class SourceOut(BaseModel):
     keyword_rank: int | None = None
     #: False when this chunk is neighbouring context rather than a search hit.
     is_hit: bool = True
+    #: 1-based position among the hits, best first; ``null`` for context chunks.
+    rank: int | None = None
+    #: Context chunks only: the hit (document_id, chunk_index) this chunk accompanies.
+    context_for: ChunkRef | None = None
 
 
 class ChatResponse(BaseModel):
     answer: str
+    #: The passages given to the LLM, in prompt order (citation ``[n]`` = position n). Hits keep their
+    #: best-first order relative to each other; context chunks sit next to their hit in reading order.
     sources: list[SourceOut]

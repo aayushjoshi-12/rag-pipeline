@@ -291,3 +291,18 @@ with the same file, or re-run the job. That re-ingest is **incremental**: only t
 character get new content hashes and are re-embedded; unchanged chunks are kept (a test pins this). `python -m app.manage reindex`
 rebuilds the *vector store* from the stored chunk text and therefore does **not** remove ligatures that are already in it.
 Set `PARSE_NORMALIZE_TEXT=false` to keep the text exactly as extracted (index-time: affects documents ingested afterwards).
+
+<!-- ticket 34: POST /search -->
+## `POST /search` and neighbour context
+
+`POST /search` ([docs/api.md](api.md)) takes the same query-time knobs as `/chat` (`mode`, `fusion`, `top_k`,
+`document_ids`, `neighbors`) and has no settings of its own. Differences worth knowing:
+
+- `neighbors` defaults to **0** on `/search` (it does not follow `RETRIEVAL_NEIGHBORS`, which shapes the `/chat`
+  prompt). The neighbour budget (12,000 characters) is shared with `/chat`.
+- Neighbour (context) chunks are unscored. In `/search` they are listed under their hit as `results[].context`; in
+  `/chat` they stay in `sources` (prompt order) with `score: null`, no ranks and `context_for` naming their hit.
+- Permission `search:use` (built-in `admin`, `user`, `viewer`); existing installs get it from migration `0007`.
+- Each call is traced as kind `search` (`meta`: `mode`, `fusion` (hybrid), `top_k`, `neighbors`, `document_filter`,
+  `include_text`; the query only when `TRACE_CAPTURE_CONTENT=true`) and shows in Traces and Usage under type
+  "Search".

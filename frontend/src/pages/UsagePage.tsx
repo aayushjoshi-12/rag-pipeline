@@ -63,6 +63,7 @@ export default function UsagePage() {
               <select className="select" value={kind} onChange={(e) => setKind(e.target.value)}>
                 <option value="">All</option>
                 <option value="chat">Chat</option>
+                <option value="search">Search</option>
                 <option value="ingest">Ingest</option>
               </select>
             </label>

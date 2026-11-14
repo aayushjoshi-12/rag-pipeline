@@ -35,6 +35,9 @@ def expand_neighbors(
 ) -> list[ChunkResult]:
     """Return ``hits`` plus their neighbours, de-duplicated and in reading order.
 
+    A neighbour is unscored (``score``/ranks ``None``) and carries ``context_for`` = the
+    ``(document_id, chunk_index)`` of the (first, in rank order) hit whose window contains it.
+
     Output order: hits in their original (rank) order; each hit is followed/preceded by its
     selected neighbours in document order, and a chunk appears once, at its first position.
     Hits are never dropped for the budget; neighbours are added nearest-first (distance 1 for
@@ -78,6 +81,11 @@ def expand_neighbors(
                         text=available[key],
                         chunk_index=idx,
                         is_hit=False,
+                        score=None,
+                        semantic_rank=None,
+                        keyword_rank=None,
+                        rank=None,
+                        context_for=(h.document_id, h.chunk_index),
                     )
                 )
     return out

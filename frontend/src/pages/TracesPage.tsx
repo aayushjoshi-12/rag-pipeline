@@ -88,7 +88,7 @@ export default function TracesPage() {
     <div className="stack">
       <PageHeader
         title="Traces"
-        description="Every chat and ingest request, with timing, token use and errors."
+        description="Every chat, search and ingest request, with timing, token use and errors."
       />
       <div className="toolbar">
         <label className="field field-inline">
@@ -103,6 +103,7 @@ export default function TracesPage() {
           >
             <option value="">All</option>
             <option value="chat">Chat</option>
+            <option value="search">Search</option>
             <option value="ingest">Ingest</option>
           </select>
         </label>
@@ -126,7 +127,7 @@ export default function TracesPage() {
       <Card flush>
         {rows.length === 0 && !error ? (
           <EmptyState icon="traces" title="No traces yet">
-            They appear after chats and ingests.
+            They appear after chats, searches and ingests.
           </EmptyState>
         ) : (
           <div className="table-wrap">

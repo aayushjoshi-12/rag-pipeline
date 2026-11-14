@@ -173,7 +173,18 @@ describe('source cards', () => {
   })
 
   it('keeps the context tag for neighbours', async () => {
-    const items = await answerWith([{ is_hit: false, score_kind: 'bm25', score: 3 }])
+    const items = await answerWith([{ is_hit: false, score_kind: 'bm25', score: null }])
     expect(within(items[0]!).getByText('context')).toBeInTheDocument()
+  })
+
+  it('shows no score, rank or distance on a context chunk, but does on its hit', async () => {
+    const items = await answerWith([
+      { is_hit: false, score: null, score_kind: 'rrf', rank: null },
+      { is_hit: true, score: 0.45, score_kind: 'distance', rank: 1 },
+    ])
+    const ctx = within(items[0]!)
+    expect(ctx.queryByText(/distance|RRF|BM25|weighted|score|not scored|NaN|null/)).toBeNull()
+    expect(ctx.getByText('context')).toBeInTheDocument()
+    expect(within(items[1]!).getByText('distance 0.45')).toBeInTheDocument()
   })
 })

@@ -47,13 +47,18 @@ class ChunkResult:
     document_id: uuid.UUID
     chunk_index: int
     filename: str
-    #: Meaning depends on ``score_kind`` (see module docstring).
-    score: float
+    #: Meaning depends on ``score_kind`` (see module docstring). ``None`` for a context-only chunk
+    #: (``is_hit`` False): a neighbour was not scored, so it never borrows the score of its hit.
+    score: float | None
     #: False for a neighbouring chunk added as context (see services/context.py)
     is_hit: bool = True
     score_kind: str = "distance"
     semantic_rank: int | None = None
     keyword_rank: int | None = None
+    #: 1-based position among the hits, best first (``None`` for context chunks). Set by services/search.py.
+    rank: int | None = None
+    #: Context chunks only: ``(document_id, chunk_index)`` of the hit this chunk accompanies.
+    context_for: tuple[uuid.UUID, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -214,7 +219,7 @@ def _fuse(
             if k in ranks:
                 continue
             ranks[k] = len(ranks) + 1
-            scored.append((k, r.score))
+            scored.append((k, r.score if r.score is not None else 0.0))
             reps.setdefault(k, r)
     if opts.fusion == "rrf":
         fused = fusion.rrf([[k for k, _ in sem_scored], [k for k, _ in kw_scored]], opts.rrf_k)

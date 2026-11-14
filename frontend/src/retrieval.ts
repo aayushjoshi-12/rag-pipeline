@@ -71,6 +71,9 @@ const NOT_COMPARABLE = 'Scores are not comparable between retrieval modes.'
 /** A human label for a source score; never a bare number, always names its scale. */
 export function scoreLabel(source: Pick<Source, 'score' | 'score_kind'>): ScoreLabel {
   const s = source.score
+  if (s == null) {
+    return { text: 'not scored', title: 'Neighbouring context chunk: it was not ranked or scored.' }
+  }
   switch (source.score_kind ?? 'distance') {
     case 'distance':
       return { text: `distance ${s.toFixed(2)}`, title: LOWER }

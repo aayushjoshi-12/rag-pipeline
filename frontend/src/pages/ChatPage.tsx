@@ -27,9 +27,11 @@ function SourceCard({ source, n }: { source: Source; n: number }) {
           <strong className="truncate" title={source.filename}>
             {source.filename} · chunk {source.chunk_index}
           </strong>
-          <span className="chip chip-static num" title={label.title}>
-            {label.text}
-          </span>
+          {!context && (
+            <span className="chip chip-static num" title={label.title}>
+              {label.text}
+            </span>
+          )}
           {source.semantic_rank != null && (
             <span className="chip chip-static num" title="Rank in the semantic (meaning) results">
               semantic #{source.semantic_rank}
@@ -44,7 +46,10 @@ function SourceCard({ source, n }: { source: Source; n: number }) {
             </span>
           )}
           {context && (
-            <span className="chip chip-static" title="Neighbouring chunk added for context">
+            <span
+              className="chip chip-static"
+              title="Neighbouring chunk added for context (not scored)"
+            >
               context
             </span>
           )}

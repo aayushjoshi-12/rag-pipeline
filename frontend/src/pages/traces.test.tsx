@@ -186,6 +186,15 @@ describe('Traces page', () => {
         offset: 25,
       }),
     )
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'search')
+    await waitFor(() =>
+      expect(m.listTraces).toHaveBeenLastCalledWith({
+        kind: 'search',
+        status: '',
+        limit: 25,
+        offset: 0,
+      }),
+    )
     await userEvent.selectOptions(screen.getByLabelText('Type'), 'ingest')
     await waitFor(() =>
       expect(m.listTraces).toHaveBeenLastCalledWith({

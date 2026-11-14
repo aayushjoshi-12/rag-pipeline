@@ -18,16 +18,15 @@ from app.routers.deps import (
     get_settings,
     get_store,
 )
-from app.schema.chat import ChatRequest, ChatResponse, SourceOut
+from app.schema.chat import ChatRequest, ChatResponse, ChunkRef, SourceOut
 from app.services import observability, traces
 from app.services.auth.permissions import Permission
-from app.services.context import add_neighbor_context
 from app.services.embeddings import Embedder
-from app.services.keyword import KeywordIndexMismatchError
 from app.services.llm import LLM, LLMConfigError, LLMRequestError, LLMUnavailableError
 from app.services.qa import answer_question
-from app.services.retriever import RetrievalOptions, retrieve
-from app.services.vectorstore import VectorStore, VectorStoreMismatchError
+from app.services.retriever import RetrievalOptions
+from app.services.search import retrieve_ranked
+from app.services.vectorstore import VectorStore
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -100,33 +99,19 @@ async def _chat(
             retrieval_mode=options.mode,
         ) as root,
     ):
-        try:
-            with observability.span("chat.retrieve", top_k=top_k, **options.trace_meta()) as sp:
-                chunks = await retrieve(
-                    req.question,
-                    top_k=top_k,
-                    embedder=embedder,
-                    store=store,
-                    session=session,
-                    document_ids=req.document_ids,
-                    options=options,
-                )
-                sp.update(metadata={"hits": len(chunks)})
-            outcome["hits"] = len(chunks)
-            if neighbors:
-                with observability.span("chat.context", neighbors=neighbors):
-                    chunks = await add_neighbor_context(chunks, neighbors, session=session)
-        except KeywordIndexMismatchError as exc:
-            logger.error("keyword_index_mismatch", error=str(exc))
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        except VectorStoreMismatchError as exc:
-            logger.error("vector_store_mismatch", problems=exc.problems)
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        except Exception as exc:
-            logger.exception("retrieval_failed")
-            raise HTTPException(
-                status.HTTP_503_SERVICE_UNAVAILABLE, "Retrieval backend unavailable."
-            ) from exc
+        retrieval = await retrieve_ranked(
+            req.question,
+            top_k=top_k,
+            neighbors=neighbors,
+            options=options,
+            document_ids=req.document_ids,
+            embedder=embedder,
+            store=store,
+            session=session,
+            span_prefix="chat",
+        )
+        chunks = retrieval.passages
+        outcome["hits"] = len(retrieval.hits)
 
         try:
             with observability.span("chat.answer", sources=len(chunks)):
@@ -154,6 +139,12 @@ async def _chat(
                     semantic_rank=c.semantic_rank,
                     keyword_rank=c.keyword_rank,
                     is_hit=c.is_hit,
+                    rank=c.rank,
+                    context_for=(
+                        ChunkRef(document_id=c.context_for[0], chunk_index=c.context_for[1])
+                        if c.context_for
+                        else None
+                    ),
                 )
                 for c in result.sources
             ],

@@ -24,6 +24,8 @@ question ─► API ─► embed query ─► Chroma similarity ─► LLM (grou
 - **Answer** — `POST /chat` retrieves the nearest chunks (optionally limited to chosen documents),
   builds a numbered-context prompt and returns the answer plus the sources it used. If nothing
   relevant is found the LLM is not called.
+- **Search without an LLM** — `POST /search` returns the ranked passages only (same retrieval as `/chat`, no LLM key
+  needed), for teams that bring their own UI or LLM. See [docs/api.md](docs/api.md).
 - **Observe** — Langfuse spans for every ingest stage and chat request; prompt/question content is
   only sent when `LANGFUSE_CAPTURE_CONTENT=true`. Structured JSON logs carry `job_id` / `chat_id`.
 - **Dashboard** — upload with live job status, document list/detail with chunks, chat with citations,
@@ -31,7 +33,7 @@ question ─► API ─► embed query ─► Chroma similarity ─► LLM (grou
   Usage page (requests, error rate, latency and LLM tokens per day). Question text is only stored in
   traces when `TRACE_CAPTURE_CONTENT=true`; traces are purged after `TRACE_RETENTION_DAYS` (30).
 - **Access control** — JWT login with role-based access: admins define roles as sets of permissions
-  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `traces:read`, `users:manage`, `roles:manage`) and assign
+  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `search:use`, `traces:read`, `users:manage`, `roles:manage`) and assign
   them to users. Permissions are checked server-side on every request and re-read from the database,
   so editing a role or deactivating a user takes effect immediately.
 - **Housekeeping** — a Celery beat task removes orphaned upload directories.
@@ -97,6 +99,7 @@ All routes except `/health` and `/auth/login|refresh` need a bearer token with t
 | DELETE | `/documents/{id}` | removes the row, chunks, vectors and the stored file |
 | GET | `/jobs/{id}` | `pending → running → done \| failed` (+ error) |
 | POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
+| POST | `/search` | `{query, top_k?, mode?, fusion?, neighbors?, document_ids?, include_text?}` → ranked `results[]` (no LLM; `search:use`; see [docs/api.md](docs/api.md)) |
 | GET | `/health` | db / redis / the active vector store (critical); `vector_settings` (stored index matches the configuration) and ollama (informational) |
 
 ## Kubernetes

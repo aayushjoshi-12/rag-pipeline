@@ -179,7 +179,7 @@ class Trace(Base):
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), default=_utcnow, index=True
     )
-    kind: Mapped[str] = mapped_column(String(16))  # "chat" | "ingest"
+    kind: Mapped[str] = mapped_column(String(16))  # "chat" | "search" | "ingest"
     status: Mapped[str] = mapped_column(String(16))  # "ok" | "error"
     duration_ms: Mapped[int] = mapped_column()
     user_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
