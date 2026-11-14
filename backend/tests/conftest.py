@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import zipfile
 from collections.abc import AsyncIterator
 from contextlib import contextmanager
@@ -9,6 +10,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+# Tests must never read a developer's real .env (API keys, provider choices): that would make
+# "no real API calls in tests" depend on whoever runs them. Set before app.config is imported,
+# because Settings captures its env-file list when the class is defined.
+os.environ["RAG_ENV_FILE"] = os.devnull
+
 from app.config import Settings
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool

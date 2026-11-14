@@ -122,9 +122,22 @@ class EnvJsonSettingsSource(PydanticBaseSettingsSource):
         return values
 
 
+def _env_files() -> str | tuple[str, ...]:
+    """``.env`` locations, later entries overriding earlier ones.
+
+    ``RAG_ENV_FILE`` wins outright. Otherwise the repo-root ``.env`` is read (so running from
+    ``backend/`` works) and a ``.env`` in the current directory overrides it.
+    """
+    explicit = os.environ.get("RAG_ENV_FILE")
+    if explicit:
+        return explicit
+    repo_root = Path(__file__).resolve().parents[2]
+    return (str(repo_root / ".env"), ".env")
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=os.environ.get("RAG_ENV_FILE", ".env"),
+        env_file=_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
     )
