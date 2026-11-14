@@ -63,7 +63,9 @@ services:
     ports:
       - "8001:8000"
     volumes:
-      - chroma-data:/chroma/chroma
+      # chromadb/chroma persists to /data (not /chroma/chroma): mounting the volume elsewhere silently
+      # kept every vector in the container's writable layer, lost on any recreate.
+      - chroma-data:/data
 
   migrate:
     <<: *backend
