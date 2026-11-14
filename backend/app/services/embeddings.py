@@ -10,6 +10,32 @@ _VALID_PROVIDERS = ("ollama", "openai")
 
 _EMBED_TIMEOUT_SECONDS = 60.0
 
+#: Output vector length of well-known embedding models, so the pgvector column can be created
+#: without a network call. Unknown models: set EMBEDDING_DIMENSION or let the store probe once.
+KNOWN_DIMENSIONS: dict[str, int] = {
+    "mxbai-embed-large": 1024,
+    "nomic-embed-text": 768,
+    "all-minilm": 384,
+    "bge-m3": 1024,
+    "snowflake-arctic-embed": 1024,
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+    "text-embedding-ada-002": 1536,
+}
+
+
+def configured_dimension(settings: Settings) -> int | None:
+    """EMBEDDING_DIMENSION, else the known length of EMBEDDING_MODEL, else ``None`` (unknown)."""
+    if settings.embedding_dimension is not None:
+        return settings.embedding_dimension
+    model = settings.embedding_model.split(":", 1)[0]  # "mxbai-embed-large:latest"
+    return KNOWN_DIMENSIONS.get(model)
+
+
+def probe_dimension(embedder: Embedder) -> int:
+    """Embed one throw-away string to learn the model's vector length (a real provider call)."""
+    return len(embedder.embed_query("dimension probe"))
+
 
 @runtime_checkable
 class Embedder(Protocol):

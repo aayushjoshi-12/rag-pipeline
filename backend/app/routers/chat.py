@@ -26,7 +26,7 @@ from app.services.embeddings import Embedder
 from app.services.llm import LLM, LLMConfigError, LLMRequestError, LLMUnavailableError
 from app.services.qa import answer_question
 from app.services.retriever import retrieve
-from app.services.vectorstore import VectorStore
+from app.services.vectorstore import VectorStore, VectorStoreMismatchError
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -106,6 +106,9 @@ async def _chat(
             if neighbors:
                 with observability.span("chat.context", neighbors=neighbors):
                     chunks = await add_neighbor_context(chunks, neighbors, session=session)
+        except VectorStoreMismatchError as exc:
+            logger.error("vector_store_mismatch", problems=exc.problems)
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         except Exception as exc:
             logger.exception("retrieval_failed")
             raise HTTPException(

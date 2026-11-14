@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app.config import Settings
@@ -14,6 +16,7 @@ from app.routers import auth, chat, documents, health, traces
 from app.services import observability
 from app.services.auth import accounts
 from app.services.langfuse import configure_from_settings
+from app.services.vectorstore import VectorStoreMismatchError, log_effective_settings
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -57,6 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("DB not reachable at startup: %s", exc)
     await _seed_auth()
+    await asyncio.to_thread(log_effective_settings, settings=settings)
     yield
     observability.flush()
     await engine.dispose()
@@ -68,3 +72,8 @@ app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(traces.router)
+
+
+@app.exception_handler(VectorStoreMismatchError)
+async def _vector_store_mismatch(_: Request, exc: VectorStoreMismatchError) -> JSONResponse:
+    return JSONResponse(status_code=503, content={"detail": str(exc)})

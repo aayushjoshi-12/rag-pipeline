@@ -46,3 +46,13 @@ schedulers in the core).
 
 - Portable: `docker compose up` on a laptop; same image + Kustomize manifests on K8s.
 - All core orchestration is config-driven, satisfying the "customizable" capability.
+
+## Addendum (2026-11-14): vector store is switchable
+
+The `VectorStore` protocol now has two backends behind `VECTOR_STORE`: **Chroma** (still the default and
+unchanged when nothing is set) and **pgvector** (a dedicated `vector_items` table in the app's Postgres, with HNSW,
+IVFFlat or no index, and a cosine/l2/ip metric). Both pass one shared contract-test suite against real services.
+Switching the store, metric, index type or embedding dimension on existing data is an explicit
+`python -m app.manage reindex` (re-embeds from the stored chunk text); the app detects the drift and says so instead of
+returning quietly wrong results. The earlier plan to keep chunk vectors in `chunks.vector` was dropped: chunk rows are
+replaced wholesale on every ingest and that column was a fixed `vector(1024)`. See `docs/configuration.md`.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import random
 import uuid
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from app.services.ingestion import ingest_document
 from app.services.parser import ParseResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.fakes import FakeEmbedder, FakeStore
+from tests.vector_helpers import InspectableStore, reader_for, real_store
 
 
 def make_text(n_words: int = 3000, seed: int = 3) -> str:
@@ -26,9 +28,9 @@ def make_text(n_words: int = 3000, seed: int = 3) -> str:
 class Env:
     """One document whose source text can be edited between ingests."""
 
-    def __init__(self, session: AsyncSession, tmp_path: Path, doc_id: uuid.UUID) -> None:
+    def __init__(self, session: AsyncSession, tmp_path: Path, doc_id: uuid.UUID, store: Any) -> None:
         self.session, self.doc_id = session, doc_id
-        self.embedder, self.store = FakeEmbedder(), FakeStore()
+        self.embedder, self.store = FakeEmbedder(), store
         self.text = ""
         self.settings = Settings()
 
@@ -58,14 +60,21 @@ class Env:
         }
 
 
-@pytest.fixture
-async def env(db_session: AsyncSession, tmp_path: Path) -> Env:
+@pytest.fixture(params=["fake", "chroma", "pgvector"])
+async def env(
+    request: pytest.FixtureRequest, db_session: AsyncSession, tmp_path: Path, isolated_db_url: str
+) -> AsyncIterator[Env]:
+    """The whole incremental-update suite runs against the in-memory fake AND both real stores."""
     src = tmp_path / "d.txt"
     src.write_text("x")
     doc = await ops.create_document(
         filename="d.txt", content_type="text/plain", source_path=str(src), session=db_session
     )
-    return Env(db_session, tmp_path, doc.id)
+    if request.param == "fake":
+        yield Env(db_session, tmp_path, doc.id, FakeStore())
+        return
+    with real_store(request.param, isolated_db_url, metric="cosine", dimension=3) as real:
+        yield Env(db_session, tmp_path, doc.id, InspectableStore(real, reader_for(request.param, real, isolated_db_url)))
 
 
 async def test_first_ingest_is_full(env: Env) -> None:

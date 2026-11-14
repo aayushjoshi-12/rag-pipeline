@@ -20,6 +20,7 @@ async def test_run_health_checks_calls_each_probe_once() -> None:
         "db": lambda r: probe(r, "db"),
         "redis": lambda r: probe(r, "redis"),
         "chroma": lambda r: probe(r, "chroma"),
+        "vector_settings": lambda r: probe(r, "vector_settings"),
         "ollama": lambda r: probe(r, "ollama"),
     }
 
@@ -34,7 +35,7 @@ async def test_run_health_checks_calls_each_probe_once() -> None:
     finally:
         h.CHECKS = orig_checks
 
-    assert calls == ["db", "redis", "chroma", "ollama"]
+    assert calls == ["db", "redis", "chroma", "vector_settings", "ollama"]
     by_name = {r.name: r for r in results}
     assert by_name["db"].ok is False
     assert by_name["redis"].ok is False

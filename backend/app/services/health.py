@@ -65,6 +65,41 @@ async def _check_chroma(result: CheckResult) -> None:
         result.detail = str(exc)[:300]
 
 
+async def _check_pgvector(result: CheckResult) -> None:
+    try:
+        from app.services.pgvector_store import PgVectorStore
+
+        store = await asyncio.to_thread(PgVectorStore.from_settings, _settings)
+        info = await asyncio.to_thread(store.describe)
+        result.ok = info["stored"] is not None
+        result.detail = f"{info['count']} vectors" if result.ok else "table missing"
+    except Exception as exc:
+        result.ok = False
+        result.detail = str(exc)[:300]
+
+
+async def _check_vector_settings(result: CheckResult) -> None:
+    """Stored index vs configured settings (and empty-store-with-data). Informational: a mismatch
+    degrades search, it should not take the API (login, documents) out of rotation."""
+    try:
+        from app.db.engine import async_session
+        from app.services.reindex import store_status
+        from app.services.vectorstore import get_vector_store
+
+        store = await asyncio.to_thread(get_vector_store, None, settings=_settings, verify=False)
+        async with async_session() as session:
+            info = await store_status(session, store)
+        result.ok = not info["problems"]
+        result.detail = (
+            f"{info['store']} {info['configured']['metric']}/{info['configured']['index']}"
+            if result.ok
+            else "; ".join(info["problems"])[:300]
+        )
+    except Exception as exc:
+        result.ok = False
+        result.detail = str(exc)[:300]
+
+
 async def _check_ollama(result: CheckResult) -> None:
     try:
         import httpx
@@ -82,11 +117,16 @@ async def _check_ollama(result: CheckResult) -> None:
         result.detail = str(exc)[:300]
 
 
-#: (name, probe, critical)
+#: (name, probe, critical). The active vector store is probed (critical); the other one is not.
 CHECKS: list[tuple[str, Probe, bool]] = [
     ("db", _check_db, True),
     ("redis", _check_redis, True),
-    ("chroma", _check_chroma, True),
+    *(
+        [("pgvector", _check_pgvector, True)]
+        if _settings.vector_store == "pgvector"
+        else [("chroma", _check_chroma, True)]
+    ),
+    ("vector_settings", _check_vector_settings, False),
     ("ollama", _check_ollama, False),
 ]
 

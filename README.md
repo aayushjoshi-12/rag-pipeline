@@ -75,6 +75,9 @@ Secrets; tunables (models, chunk size, top-k, parser knobs) are plain config. Ev
 swappable: `LLM_PROVIDER` (openrouter | openai | anthropic), `EMBEDDING_PROVIDER` (ollama | openai),
 `PARSER_PROVIDER` (openrouter | openai | anthropic | ocr). Free-tier OpenRouter models come and go —
 if chat returns a 502, check `DEFAULT_LLM_MODEL` against OpenRouter's current model list.
+`VECTOR_STORE` (chroma | pgvector), `VECTOR_METRIC`, `VECTOR_INDEX` (hnsw | ivfflat | none) and the HNSW / IVFFlat
+knobs choose where vectors live and how they are indexed; changing them on existing data is a
+`python -m app.manage reindex`. Every key is listed in [`docs/configuration.md`](docs/configuration.md).
 
 ## API
 
@@ -92,7 +95,7 @@ All routes except `/health` and `/auth/login|refresh` need a bearer token with t
 | DELETE | `/documents/{id}` | removes the row, chunks, vectors and the stored file |
 | GET | `/jobs/{id}` | `pending → running → done \| failed` (+ error) |
 | POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
-| GET | `/health` | db / redis / chroma (critical) and ollama (informational) |
+| GET | `/health` | db / redis / the active vector store (critical); `vector_settings` (stored index matches the configuration) and ollama (informational) |
 
 ## Kubernetes
 
@@ -131,6 +134,7 @@ Honest accounting of what has been exercised against real services versus only u
 | Chat (retrieval + LLM) | real OpenRouter free model, cited answers | passed |
 | Incremental update | real stack: edit 1 paragraph of a 126-chunk doc, `PUT` → **1** chunk re-embedded, 124 reused | passed |
 | Incremental update on real revisions | Fannie Mae Selling Guide ch. B3-5, Oct 8 → Nov 5 2025 (real PDFs, real OCR): `PUT` reused **173/342** chunks, embedded 169 (a rebuild embeds 342) | passed (answer check after the update not run: LLM rate-limited) |
+| Vector store options (Chroma / pgvector, metric, HNSW / IVFFlat) | one contract-test suite on **both** stores against real Chroma + Postgres/pgvector (metric orderings and score values, filters, incremental-update primitives, `pg_indexes`, `EXPLAIN`), plus the real stack on chroma-l2, chroma-cosine, pgvector hnsw and pgvector ivfflat: 388 real chunks, mismatch detected at startup and fixed with `manage reindex` | passed (retrieval 8/12, hit@1 7/12 on all four: identical because the data is tiny and the embeddings normalised, so this shows nothing about ANN recall; the planner ignores both indexes at 388 rows, forced-index recall@5 vs exact: hnsw 1.00, ivfflat 0.97) |
 | Dashboard | real Chromium driving upload → live job → chat → delete | passed |
 | Traces + usage dashboard | real stack + real Chromium: real ingest (ok and corrupt-PDF failure), chat (LLM rate-limited → error traces), API/UI numbers cross-checked, charts reviewed in light/dark | passed (token chart with real token data not seen: LLM returned only 429s) |
 | Langfuse tracing | traces read back from a real Langfuse project | passed |

@@ -44,6 +44,10 @@ def _selected_environment() -> str | None:
 #: Upper bound for ``retrieval_neighbors`` (each hit expands to at most 2N+1 chunks).
 MAX_NEIGHBORS = 5
 
+VECTOR_STORES = ("chroma", "pgvector")
+VECTOR_METRICS = ("cosine", "l2", "ip")
+VECTOR_INDEXES = ("hnsw", "ivfflat", "none")
+
 _PLACEHOLDER_KEYS: frozenset[str] = frozenset({"change-me", "replace-me", "changeme", "secret"})
 
 #: Fields that are secrets and must NEVER appear in config/config.<env>.json.
@@ -197,10 +201,26 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
 
-    # ── Vector store (Chroma) ────────────────────────────────────────────────
+    # ── Vector store (Chroma default, pgvector optional; see docs/configuration.md) ──
     vector_store: str = "chroma"
     chroma_host: str = "localhost"
     chroma_port: int = 8001
+    #: Chroma collection holding the vectors (several deployments can share one Chroma server).
+    chroma_collection: str = "documents"
+    #: Distance metric. None = the store's own default: ``l2`` for Chroma (what an existing
+    #: collection already uses), ``cosine`` for pgvector. Index-time (needs a reindex to change).
+    vector_metric: str | None = None
+    #: ANN index. None = ``hnsw`` (Chroma only ever has HNSW). pgvector also supports ivfflat/none.
+    vector_index: str | None = None
+    #: HNSW build/search knobs. None = the store default (pgvector 16/64/40; Chroma 16/100/100).
+    hnsw_m: int | None = None
+    hnsw_ef_construction: int | None = None
+    hnsw_ef_search: int | None = None
+    #: pgvector ivfflat knobs. None = 100 lists / 10 probes.
+    ivfflat_lists: int | None = None
+    ivfflat_probes: int | None = None
+    #: Embedding vector length for pgvector's column. None = look up the model, else probe once.
+    embedding_dimension: int | None = None
 
     # ── Embeddings (Ollama default) ──────────────────────────────────────────
     embedding_provider: str = "ollama"
@@ -255,8 +275,7 @@ class Settings(BaseSettings):
             raise SettingsError(f"Unknown LLM provider '{self.llm_provider}'.")
         if self.embedding_provider not in ("ollama", "openai"):
             raise SettingsError(f"Unknown embedding provider '{self.embedding_provider}'.")
-        if self.vector_store not in ("chroma",):
-            raise SettingsError(f"Unknown vector store '{self.vector_store}'.")
+        self._validate_vector()
         if self.parser_provider not in ("openrouter", "openai", "anthropic", "ocr"):
             raise SettingsError(f"Unknown parser provider '{self.parser_provider}'.")
         if self.pdf_text_source not in ("auto", "native", "image"):
@@ -290,6 +309,48 @@ class Settings(BaseSettings):
                 "parser_max_completion_tokens must be within 256..32000."
             )
         return self
+
+    def _validate_vector(self) -> None:
+        if self.vector_store not in VECTOR_STORES:
+            raise SettingsError(
+                f"Unknown vector store '{self.vector_store}'. Allowed: {', '.join(VECTOR_STORES)}."
+            )
+        if self.vector_metric is not None and self.vector_metric not in VECTOR_METRICS:
+            raise SettingsError(
+                f"Unknown VECTOR_METRIC '{self.vector_metric}'. Allowed: {', '.join(VECTOR_METRICS)}."
+            )
+        if self.vector_index is not None and self.vector_index not in VECTOR_INDEXES:
+            raise SettingsError(
+                f"Unknown VECTOR_INDEX '{self.vector_index}'. Allowed: {', '.join(VECTOR_INDEXES)}."
+            )
+        if self.vector_store == "chroma" and self.vector_index not in (None, "hnsw"):
+            raise SettingsError(
+                f"VECTOR_INDEX={self.vector_index} is only available with VECTOR_STORE=pgvector "
+                "(Chroma always builds an HNSW index)."
+            )
+        ranges = {
+            "hnsw_m": (self.hnsw_m, 2, 100),
+            "hnsw_ef_construction": (self.hnsw_ef_construction, 4, 1000),
+            "hnsw_ef_search": (self.hnsw_ef_search, 1, 1000),
+            "ivfflat_lists": (self.ivfflat_lists, 1, 32768),
+            "ivfflat_probes": (self.ivfflat_probes, 1, 32768),
+            "embedding_dimension": (self.embedding_dimension, 1, 16000),
+        }
+        for name, (value, low, high) in ranges.items():
+            if value is not None and not low <= value <= high:
+                raise SettingsError(f"{name} must be within {low}..{high} (got {value}).")
+        if (
+            self.hnsw_m is not None
+            and self.hnsw_ef_construction is not None
+            and self.hnsw_ef_construction < 2 * self.hnsw_m
+        ):
+            raise SettingsError("hnsw_ef_construction must be at least 2 * hnsw_m.")
+        if (
+            self.ivfflat_lists is not None
+            and self.ivfflat_probes is not None
+            and self.ivfflat_probes > self.ivfflat_lists
+        ):
+            raise SettingsError("ivfflat_probes must not exceed ivfflat_lists.")
 
     def _warn_langfuse(self) -> None:
         """Tracing is best-effort: a malformed Langfuse config warns, it never fails startup."""

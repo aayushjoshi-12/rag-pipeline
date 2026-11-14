@@ -27,8 +27,10 @@ class FakeClient:
     def __init__(self, tmp_path: object) -> None:
         self.collections: dict[str, FakeCollection] = {}
         self.deleted: list[str] = []
+        self.configurations: list[tuple[str, Any]] = []
 
-    def get_or_create_collection(self, name: str) -> FakeCollection:
+    def get_or_create_collection(self, name: str, configuration: Any = None) -> FakeCollection:
+        self.configurations.append((name, configuration))
         if name not in self.collections:
             self.collections[name] = FakeCollection()
         return self.collections[name]
@@ -48,7 +50,9 @@ def _make_store(monkeypatch: pytest.MonkeyPatch) -> tuple[vs.ChromaStore, FakeCl
 
 def test_get_vector_store_chroma(monkeypatch: pytest.MonkeyPatch) -> None:
     class StubStore:
-        pass
+        def __init__(self, **_: Any) -> None: ...
+
+        def verify(self) -> None: ...
 
     monkeypatch.setattr(vs, "ChromaStore", StubStore)
     assert isinstance(vs.get_vector_store("chroma"), StubStore)
@@ -147,3 +151,48 @@ def test_reset_deletes_and_recreates_collection(monkeypatch: pytest.MonkeyPatch)
     store.reset()
     assert client.deleted == ["documents"]
     assert "documents" in client.collections
+
+def test_chroma_collection_is_created_with_the_configured_hnsw_options(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = FakeClient(tmp_path=None)
+    monkeypatch.setattr("chromadb.HttpClient", lambda **kwargs: client)
+    vs.ChromaStore(
+        collection_name="c",
+        vector_settings=vs.VectorSettings(
+            store="chroma", metric="cosine", index="hnsw", hnsw_m=8, hnsw_ef_construction=50, hnsw_ef_search=30
+        ),
+    )
+    assert client.configurations == [
+        ("c", {"hnsw": {"space": "cosine", "max_neighbors": 8, "ef_construction": 50, "ef_search": 30}})
+    ]
+
+
+def test_default_chroma_collection_config_only_names_the_default_space(monkeypatch: pytest.MonkeyPatch) -> None:
+    store, client, _c = _make_store(monkeypatch)
+    assert client.configurations == [("documents", {"hnsw": {"space": "l2"}})]
+    store.reset()
+    assert client.configurations[-1] == ("documents", {"hnsw": {"space": "l2"}})
+
+
+def test_get_vector_store_pgvector_builds_the_pg_store_and_verifies(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.config import Settings
+    from app.services import pgvector_store
+
+    calls: list[str] = []
+
+    class StubPg:
+        @classmethod
+        def from_settings(cls, settings: Settings) -> StubPg:
+            calls.append("built")
+            return cls()
+
+        def verify(self) -> None:
+            calls.append("verified")
+
+    monkeypatch.setattr(pgvector_store, "PgVectorStore", StubPg)
+    vs._verified.clear()
+    cfg = Settings(vector_store="pgvector")
+    assert isinstance(vs.get_vector_store(settings=cfg), StubPg)
+    vs.get_vector_store(settings=cfg)  # second call within the TTL does not re-verify
+    assert calls == ["built", "verified", "built"]
+    vs.get_vector_store(settings=cfg, verify=False)
+    vs._verified.clear()

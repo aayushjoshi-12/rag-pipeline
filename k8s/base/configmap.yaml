@@ -10,6 +10,16 @@ data:
   PORT: "8000"
   LOG_LEVEL: "INFO"
   VECTOR_STORE: "chroma"
+  CHROMA_COLLECTION: "documents"
+  # Optional vector options (docs/configuration.md); unset = store defaults. Changing them on existing data
+  # needs a reindex: kubectl exec deploy/api -- python -m app.manage reindex
+  # VECTOR_METRIC: "cosine"
+  # VECTOR_INDEX: "hnsw"
+  # HNSW_M: "16"
+  # HNSW_EF_CONSTRUCTION: "64"
+  # HNSW_EF_SEARCH: "40"
+  # IVFFLAT_LISTS: "100"
+  # IVFFLAT_PROBES: "10"
   CHROMA_HOST: "chroma"
   CHROMA_PORT: "8000"
   REDIS_URL: "redis://redis:6379/0"
