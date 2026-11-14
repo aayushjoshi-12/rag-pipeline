@@ -1,7 +1,8 @@
-"""S3Storage / s3:// ingest / orphan sweep against a REAL MinIO (skipped when it is not running)."""
+"""S3Storage / s3:// ingest / orphan sweep against a REAL S3 emulator, Floci (skipped when it is not running)."""
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import uuid
 from pathlib import Path
@@ -17,7 +18,7 @@ from app.services.ingestion import ingest_document
 from app.services.parser import ParseResult
 from app.services.storage import S3Storage, StorageError, key_dir, new_key
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.conftest import minio_settings
+from tests.conftest import s3_settings
 from tests.fakes import FakeEmbedder, FakeStore
 
 
@@ -27,8 +28,8 @@ def _file(tmp_path: Path, content: bytes = b"hello s3 " * 50, name: str = "f.txt
     return p
 
 
-def test_round_trip_exists_and_delete_dir(minio_bucket: str, tmp_path: Path) -> None:
-    st = S3Storage(minio_settings(minio_bucket))
+def test_round_trip_exists_and_delete_dir(s3_bucket: str, tmp_path: Path) -> None:
+    st = S3Storage(s3_settings(s3_bucket))
     key = new_key("a.txt")
     other = new_key("b.txt")
     st.put_file(key, _file(tmp_path), "text/plain")
@@ -42,11 +43,11 @@ def test_round_trip_exists_and_delete_dir(minio_bucket: str, tmp_path: Path) -> 
     assert st.delete_dir("not-ours/x/y") == 0  # keys of another shape are never deleted
 
 
-def test_keys_are_confined_to_the_prefix(minio_bucket: str, s3_client: Any, tmp_path: Path) -> None:
-    st = S3Storage(minio_settings(minio_bucket))
+def test_keys_are_confined_to_the_prefix(s3_bucket: str, s3_client: Any, tmp_path: Path) -> None:
+    st = S3Storage(s3_settings(s3_bucket))
     key = new_key("c.txt")
     st.put_file(key, _file(tmp_path), None)
-    keys = [o["Key"] for o in s3_client.list_objects_v2(Bucket=minio_bucket)["Contents"]]
+    keys = [o["Key"] for o in s3_client.list_objects_v2(Bucket=s3_bucket)["Contents"]]
     assert f"test-prefix/{key}" in keys
     for bad in ("../x", "/abs", "a/../b", ""):
         with pytest.raises(StorageError):
@@ -54,9 +55,9 @@ def test_keys_are_confined_to_the_prefix(minio_bucket: str, s3_client: Any, tmp_
 
 
 async def test_orphan_sweep_only_touches_owned_unreferenced_old_objects(
-    minio_bucket: str, s3_client: Any, db_session: AsyncSession, tmp_path: Path
+    s3_bucket: str, s3_client: Any, db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    st = S3Storage(minio_settings(minio_bucket, s3_prefix="sweep/"))
+    st = S3Storage(s3_settings(s3_bucket, s3_prefix="sweep/"))
     # owned + referenced (must stay), owned + unreferenced (goes once old enough)
     referenced, orphan_key = new_key("ref.txt"), new_key("orphan.txt")
     for k in (referenced, orphan_key):
@@ -69,7 +70,7 @@ async def test_orphan_sweep_only_touches_owned_unreferenced_old_objects(
     foreign = ["other-tenant/uploads/" + uuid.uuid4().hex + "/x.txt", "sweep/notes/readme.txt",
                "sweep/uploads/not-a-uuid/x.txt", "sweep/uploads/" + uuid.uuid4().hex + "/sub/deep.txt", "sweep-extra/uploads/" + uuid.uuid4().hex + "/x.txt"]
     for k in foreign:
-        s3_client.put_object(Bucket=minio_bucket, Key=k, Body=b"not ours")
+        s3_client.put_object(Bucket=s3_bucket, Key=k, Body=b"not ours")
 
     import time
 
@@ -83,14 +84,14 @@ async def test_orphan_sweep_only_touches_owned_unreferenced_old_objects(
     assert st.exists(referenced), "referenced document object must survive"
     assert not st.exists(orphan_key)
     for k in foreign:
-        s3_client.head_object(Bucket=minio_bucket, Key=k)  # raises if the sweep deleted it
+        s3_client.head_object(Bucket=s3_bucket, Key=k)  # raises if the sweep deleted it
     await ops.delete_document(doc.id, session=db_session)
 
 
 async def test_sweep_respects_age_limit_and_other_backend_rows(
-    minio_bucket: str, db_session: AsyncSession, tmp_path: Path
+    s3_bucket: str, db_session: AsyncSession, tmp_path: Path
 ) -> None:
-    st = S3Storage(minio_settings(minio_bucket, s3_prefix="age/"))
+    st = S3Storage(s3_settings(s3_bucket, s3_prefix="age/"))
     key = new_key("x.txt")
     st.put_file(key, _file(tmp_path), None)
     # a LOCAL document with the same key must not protect the S3 object (different backend)
@@ -103,50 +104,50 @@ async def test_sweep_respects_age_limit_and_other_backend_rows(
     await ops.delete_document(doc.id, session=db_session)
 
 
-def test_s3_link_download_copies_into_storage(minio_bucket: str, s3_client: Any, tmp_path: Path) -> None:
-    cfg = minio_settings(minio_bucket, s3_prefix="dl/")
-    s3_client.put_object(Bucket=minio_bucket, Key="inbox/Report 1.txt", Body=b"quarterly numbers " * 10,
+def test_s3_link_download_copies_into_storage(s3_bucket: str, s3_client: Any, tmp_path: Path) -> None:
+    cfg = s3_settings(s3_bucket, s3_prefix="dl/")
+    s3_client.put_object(Bucket=s3_bucket, Key="inbox/Report 1.txt", Body=b"quarterly numbers " * 10,
                          ContentType="text/plain")
-    out = fetch_to_storage(f"s3://{minio_bucket}/inbox/Report%201.txt", cfg, S3Storage(cfg))
+    out = fetch_to_storage(f"s3://{s3_bucket}/inbox/Report%201.txt", cfg, S3Storage(cfg))
     assert out.filename == "Report 1.txt" and out.storage == "s3" and out.size == 180
     assert key_dir(out.key) is not None
     with S3Storage(cfg).local_path(out.key) as p:
         assert p.read_bytes().startswith(b"quarterly")
 
 
-def test_s3_link_rules(minio_bucket: str, s3_client: Any) -> None:
-    cfg = minio_settings(minio_bucket, max_upload_size_bytes=100)
-    s3_client.put_object(Bucket=minio_bucket, Key="big.txt", Body=b"x" * 500, ContentType="text/plain")
-    s3_client.put_object(Bucket=minio_bucket, Key="noext", Body=b"abc", ContentType="application/octet-stream")
+def test_s3_link_rules(s3_bucket: str, s3_client: Any) -> None:
+    cfg = s3_settings(s3_bucket, max_upload_size_bytes=100)
+    s3_client.put_object(Bucket=s3_bucket, Key="big.txt", Body=b"x" * 500, ContentType="text/plain")
+    s3_client.put_object(Bucket=s3_bucket, Key="noext", Body=b"abc", ContentType="application/octet-stream")
     st = S3Storage(cfg)
     with pytest.raises(FetchError, match="larger than"):
-        fetch_to_storage(f"s3://{minio_bucket}/big.txt", cfg, st)
+        fetch_to_storage(f"s3://{s3_bucket}/big.txt", cfg, st)
     with pytest.raises(FetchError, match="not allowed"):
         fetch_to_storage("s3://some-other-bucket/big.txt", cfg, st)
     with pytest.raises(FetchError, match="NoSuchKey"):
-        fetch_to_storage(f"s3://{minio_bucket}/missing.txt", cfg, st)
+        fetch_to_storage(f"s3://{s3_bucket}/missing.txt", cfg, st)
     with pytest.raises(FetchError, match="Cannot tell the file type"):
-        fetch_to_storage(f"s3://{minio_bucket}/noext", cfg, st)
+        fetch_to_storage(f"s3://{s3_bucket}/noext", cfg, st)
     with pytest.raises(FetchError, match="not allowed"):  # scheme allow-list also covers s3
-        fetch_to_storage(f"s3://{minio_bucket}/big.txt", Settings(**{**cfg.model_dump(), "url_ingest_schemes": "https"}), st)
+        fetch_to_storage(f"s3://{s3_bucket}/big.txt", Settings(**{**cfg.model_dump(), "url_ingest_schemes": "https"}), st)
 
 
-def test_extra_buckets_allow_list(minio_bucket: str, s3_client: Any) -> None:
-    cfg = minio_settings(minio_bucket, url_ingest_s3_buckets="not-this-one")
+def test_extra_buckets_allow_list(s3_bucket: str, s3_client: Any) -> None:
+    cfg = s3_settings(s3_bucket, url_ingest_s3_buckets="not-this-one")
     assert cfg.url_s3_buckets == ("not-this-one",)
     with pytest.raises(FetchError, match="not allowed"):
-        fetch_to_storage(f"s3://{minio_bucket}/x.txt", cfg, S3Storage(cfg))
+        fetch_to_storage(f"s3://{s3_bucket}/x.txt", cfg, S3Storage(cfg))
 
 
 async def test_ingest_from_s3_link_into_s3_storage(
-    minio_bucket: str, s3_client: Any, db_session: AsyncSession
+    s3_bucket: str, s3_client: Any, db_session: AsyncSession
 ) -> None:
-    cfg = minio_settings(minio_bucket, s3_prefix="e2e/")
-    s3_client.put_object(Bucket=minio_bucket, Key="src/notes.md", ContentType="text/markdown",
+    cfg = s3_settings(s3_bucket, s3_prefix="e2e/")
+    s3_client.put_object(Bucket=s3_bucket, Key="src/notes.md", ContentType="text/markdown",
                          Body=(" ".join(f"word{i}" for i in range(400))).encode())
-    url = f"s3://{minio_bucket}/src/notes.md"
+    url = f"s3://{s3_bucket}/src/notes.md"
     doc = await ops.create_document(filename="notes.md", content_type="application/octet-stream",
-                                    source_url=f"s3://{minio_bucket}/src/notes.md", storage_backend="s3", session=db_session)
+                                    source_url=f"s3://{s3_bucket}/src/notes.md", storage_backend="s3", session=db_session)
     job = await ops.create_job(document_id=doc.id, session=db_session)
     doc_id, job_id = doc.id, job.id
     seen: list[str] = []
@@ -186,12 +187,12 @@ async def test_ingest_without_the_link_fails_cleanly(db_session: AsyncSession, t
 
 
 @pytest.fixture
-async def s3_api(minio_bucket: str, db_session: AsyncSession) -> Any:
+async def s3_api(s3_bucket: str, db_session: AsyncSession) -> Any:
     import httpx
     from app.main import app
     from app.routers import deps
 
-    cfg = minio_settings(minio_bucket, s3_prefix="api/", max_upload_size_bytes=10_000)
+    cfg = s3_settings(s3_bucket, s3_prefix="api/", max_upload_size_bytes=10_000)
 
     async def session_dep() -> Any:
         yield db_session
@@ -227,7 +228,7 @@ async def test_api_upload_replace_delete_on_s3(s3_api: Any, db_session: AsyncSes
     assert not st.exists(key2)
 
 
-async def test_api_oversize_upload_leaves_no_object(s3_api: Any, s3_client: Any, minio_bucket: str) -> None:
+async def test_api_oversize_upload_leaves_no_object(s3_api: Any, s3_client: Any, s3_bucket: str) -> None:
     c, st, _ = s3_api
     before = len(list(st.iter_objects()))
     r = await c.post("/documents", files={"file": ("big.txt", b"x" * 20_000, "text/plain")})
@@ -250,3 +251,70 @@ async def test_documents_created_on_local_keep_working_after_switching_to_s3(
     # the API config points data_dir elsewhere, so use LocalStorage semantics directly for the file
     assert LocalStorage(tmp_path).exists("uploads/" + "a" * 32 + "/old.txt")
     assert (await c.delete(f"/documents/{doc.id}")).status_code == 204
+
+
+# ── ensure_bucket / `manage ensure-bucket` (local S3 emulators start empty) ──────────────────────────
+
+
+def test_ensure_bucket_creates_once_and_is_idempotent(s3_bucket: str, s3_client: Any) -> None:
+    from app.services.storage import ensure_bucket
+
+    name = f"rag-ensure-{uuid.uuid4().hex[:10]}"
+    cfg = s3_settings(name)
+    try:
+        assert ensure_bucket(cfg) == "created"
+        s3_client.head_bucket(Bucket=name)  # really exists now
+        assert ensure_bucket(cfg) == "exists"  # second call is a no-op
+    finally:
+        with contextlib.suppress(Exception):  # best-effort cleanup of a bucket this test created
+            s3_client.delete_bucket(Bucket=name)
+
+
+def test_ensure_bucket_in_a_non_default_region(s3_bucket: str, s3_client: Any) -> None:
+    from app.services.storage import ensure_bucket
+
+    name = f"rag-ensure-eu-{uuid.uuid4().hex[:8]}"
+    cfg = s3_settings(name, s3_region="eu-west-1")
+    try:
+        assert ensure_bucket(cfg) == "created"
+        assert ensure_bucket(cfg) == "exists"
+    finally:
+        with contextlib.suppress(Exception):  # best-effort cleanup of a bucket this test created
+            s3_client.delete_bucket(Bucket=name)
+
+
+def test_ensure_bucket_requires_a_bucket_name() -> None:
+    from app.services.storage import ensure_bucket
+
+    with pytest.raises(ValueError, match="S3_BUCKET"):
+        ensure_bucket(Settings(storage_backend="s3", s3_bucket="", auth_enabled=False))
+
+
+def test_manage_ensure_bucket_command(s3_bucket: str, s3_client: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import app.manage as manage
+    from tests.conftest import S3_EMULATOR_ENDPOINT, S3_EMULATOR_KEY, S3_EMULATOR_SECRET
+
+    name = f"rag-cli-{uuid.uuid4().hex[:10]}"
+    for k, v in {"STORAGE_BACKEND": "s3", "S3_BUCKET": name, "S3_ENDPOINT_URL": S3_EMULATOR_ENDPOINT,
+                 "S3_ACCESS_KEY_ID": S3_EMULATOR_KEY, "S3_SECRET_ACCESS_KEY": S3_EMULATOR_SECRET}.items():
+        monkeypatch.setenv(k, v)
+    try:
+        assert manage.main(["ensure-bucket"]) == 0
+        assert f"bucket {name}: created" in capsys.readouterr().out
+        assert manage.main(["ensure-bucket"]) == 0
+        assert f"bucket {name}: exists" in capsys.readouterr().out
+    finally:
+        with contextlib.suppress(Exception):  # best-effort cleanup of a bucket this test created
+            s3_client.delete_bucket(Bucket=name)
+
+
+def test_manage_ensure_bucket_fails_fast_when_the_store_is_unreachable(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    import app.manage as manage
+
+    monkeypatch.setenv("STORAGE_BACKEND", "s3")
+    monkeypatch.setenv("S3_BUCKET", "whatever")
+    monkeypatch.setenv("S3_ENDPOINT_URL", "http://127.0.0.1:9")  # nothing listens here
+    monkeypatch.setenv("S3_ACCESS_KEY_ID", "x")
+    monkeypatch.setenv("S3_SECRET_ACCESS_KEY", "x")
+    assert manage.main(["ensure-bucket"]) == 1
+    assert "error:" in capsys.readouterr().err

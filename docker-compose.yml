@@ -16,7 +16,7 @@ x-backend-env: &backend-env
   ADMIN_EMAIL: ${ADMIN_EMAIL:-}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
   # File storage / URL ingest (docs/configuration.md). Defaults reproduce the pre-ticket-22
-  # behaviour (local disk); set them in the shell or .env, e.g. for the `s3` profile (MinIO).
+  # behaviour (local disk); set them in the shell or .env, e.g. for the `s3` profile (Floci).
   STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
   S3_ENDPOINT_URL: ${S3_ENDPOINT_URL_DOCKER:-${S3_ENDPOINT_URL:-}}
   S3_BUCKET: ${S3_BUCKET:-}
@@ -78,29 +78,33 @@ services:
       # kept every vector in the container's writable layer, lost on any recreate.
       - chroma-data:/data
 
-  # Optional S3-compatible object store (real MinIO) for STORAGE_BACKEND=s3 / s3:// ingest. Only started
-  # with `docker compose --profile s3 up`; the default `docker compose up` is unchanged.
-  # Image: MinIO no longer publishes to Docker Hub/Quay, so the default is the last public Bitnami
-  # build (MinIO 2025.5.24, frozen); override with MINIO_IMAGE (e.g. your own mirror of minio/minio).
-  # Dev credentials only: override MINIO_ROOT_USER / MINIO_ROOT_PASSWORD outside a laptop.
-  minio:
-    image: ${MINIO_IMAGE:-bitnamilegacy/minio:latest}
-    container_name: rag-pipeline-minio
+  # Optional local S3 emulator for STORAGE_BACKEND=s3 / s3:// ingest. Only started with
+  # `docker compose --profile s3 up -d floci floci-init` (the default `docker compose up` is unchanged).
+  # Floci is a free (MIT) AWS emulator: ~40 MiB idle, S3 on :4566, any credentials are accepted (dev only).
+  # Containers reach it as http://floci:4566 (set S3_ENDPOINT_URL_DOCKER); host tools use http://localhost:4566.
+  floci:
+    image: ${FLOCI_IMAGE:-floci/floci:latest}
+    container_name: rag-pipeline-floci
     profiles: ["s3"]
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
-      MINIO_DEFAULT_BUCKETS: ${S3_BUCKET:-rag-documents}
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio-data:/bitnami/minio/data
-    healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
-      interval: 5s
-      timeout: 3s
-      retries: 12
+      - "4566:4566"
+
+  # One-shot: creates the bucket ($S3_BUCKET, default rag-documents) on the emulator; safe to re-run.
+  floci-init:
+    <<: *backend
+    container_name: rag-pipeline-floci-init
+    profiles: ["s3"]
+    command: python -m app.manage ensure-bucket --wait 60
+    environment:
+      <<: *backend-env
+      S3_ENDPOINT_URL: http://floci:4566
+      S3_BUCKET: ${S3_BUCKET:-rag-documents}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-test}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-test}
+    depends_on:
+      floci:
+        condition: service_started
+    restart: "no"
 
   migrate:
     <<: *backend
@@ -170,4 +174,3 @@ volumes:
   appdata:
   pgdata:
   chroma-data:
-  minio-data:

@@ -6,7 +6,7 @@ changing ``STORAGE_BACKEND`` never strands existing documents.
 
 * ``LocalStorage`` - ``DATA_DIR/<key>`` (default; unchanged on-disk layout).
 * ``S3Storage``    - ``s3://<S3_BUCKET>/<S3_PREFIX><key>`` through boto3 (AWS or any S3-compatible
-  store such as MinIO). The app only ever lists, reads or deletes keys under its own prefix.
+  store such as Floci, MinIO or R2). The app only ever lists, reads or deletes keys under its own prefix.
 
 All methods are blocking; async callers wrap them in ``asyncio.to_thread``.
 """
@@ -210,6 +210,31 @@ def make_s3_client(settings: Settings) -> Any:
         aws_secret_access_key=settings.s3_secret_access_key or None,
         config=cfg,
     )
+
+
+def ensure_bucket(settings: Settings) -> str:
+    """Create ``S3_BUCKET`` when it does not exist. Idempotent; returns ``"exists"`` or ``"created"``.
+
+    Meant for local S3 emulators (the Compose ``s3`` profile) that start empty; on AWS buckets are
+    normally created by infrastructure code, but this works there too given the permission.
+    """
+    from botocore.exceptions import ClientError
+
+    if not settings.s3_bucket:
+        raise ValueError("S3_BUCKET is not set")
+    client = make_s3_client(settings)
+    try:
+        client.head_bucket(Bucket=settings.s3_bucket)
+        return "exists"
+    except ClientError as exc:
+        code = str(exc.response.get("Error", {}).get("Code", ""))
+        if code not in ("404", "NoSuchBucket", "NotFound"):
+            raise
+    params: dict[str, Any] = {"Bucket": settings.s3_bucket}
+    if settings.s3_region and settings.s3_region != "us-east-1":  # AWS rejects a LocationConstraint for us-east-1
+        params["CreateBucketConfiguration"] = {"LocationConstraint": settings.s3_region}
+    client.create_bucket(**params)
+    return "created"
 
 
 def get_storage(settings: Settings, backend: str | None = None) -> Storage:

@@ -138,24 +138,24 @@ async def db_session(isolated_db_url: str) -> AsyncIterator[AsyncSession]:
     await engine.dispose()
 
 
-# ── Real MinIO (Compose profile `s3`: `docker compose --profile s3 up -d minio`) ────────────────────
+# ── Real S3 emulator: Floci (Compose profile `s3`: `docker compose --profile s3 up -d floci`) ─────────
 
-MINIO_ENDPOINT = os.environ.get("TEST_S3_ENDPOINT_URL", "http://localhost:9000")
-MINIO_KEY = os.environ.get("TEST_S3_ACCESS_KEY_ID", "minioadmin")
-MINIO_SECRET = os.environ.get("TEST_S3_SECRET_ACCESS_KEY", "minioadmin")
+S3_EMULATOR_ENDPOINT = os.environ.get("TEST_S3_ENDPOINT_URL", "http://localhost:4566")
+S3_EMULATOR_KEY = os.environ.get("TEST_S3_ACCESS_KEY_ID", "test")
+S3_EMULATOR_SECRET = os.environ.get("TEST_S3_SECRET_ACCESS_KEY", "test")
 
 
 @pytest.fixture(scope="module")
-def minio_bucket() -> Iterator[str]:
-    """A throwaway bucket on the real MinIO; skipped with a clear message when it is not running."""
+def s3_bucket() -> Iterator[str]:
+    """A throwaway bucket on the real S3 emulator (Floci); skipped with a clear message when it is not running."""
     import boto3
     from botocore.config import Config
 
     client = boto3.client(
         "s3",
-        endpoint_url=MINIO_ENDPOINT,
-        aws_access_key_id=MINIO_KEY,
-        aws_secret_access_key=MINIO_SECRET,
+        endpoint_url=S3_EMULATOR_ENDPOINT,
+        aws_access_key_id=S3_EMULATOR_KEY,
+        aws_secret_access_key=S3_EMULATOR_SECRET,
         region_name="us-east-1",
         config=Config(s3={"addressing_style": "path"}, connect_timeout=2, retries={"max_attempts": 1}),
     )
@@ -164,8 +164,8 @@ def minio_bucket() -> Iterator[str]:
         client.create_bucket(Bucket=name)
     except Exception as exc:
         pytest.skip(
-            f"MinIO not reachable at {MINIO_ENDPOINT} ({type(exc).__name__}); "
-            "start it with `docker compose --profile s3 up -d minio`"
+            f"S3 emulator (Floci) not reachable at {S3_EMULATOR_ENDPOINT} ({type(exc).__name__}); "
+            "start it with `docker compose --profile s3 up -d floci`"
         )
     try:
         yield name
@@ -177,20 +177,20 @@ def minio_bucket() -> Iterator[str]:
 
 
 @pytest.fixture
-def s3_client(minio_bucket: str) -> Any:
+def s3_client(s3_bucket: str) -> Any:
     from app.services.storage import make_s3_client
 
-    return make_s3_client(minio_settings(minio_bucket))
+    return make_s3_client(s3_settings(s3_bucket))
 
 
-def minio_settings(bucket: str, **kw: Any) -> Settings:
+def s3_settings(bucket: str, **kw: Any) -> Settings:
     kw.setdefault("s3_prefix", "test-prefix/")
     return Settings(
         storage_backend="s3",
-        s3_endpoint_url=MINIO_ENDPOINT,
+        s3_endpoint_url=S3_EMULATOR_ENDPOINT,
         s3_bucket=bucket,
-        s3_access_key_id=MINIO_KEY,
-        s3_secret_access_key=MINIO_SECRET,
+        s3_access_key_id=S3_EMULATOR_KEY,
+        s3_secret_access_key=S3_EMULATOR_SECRET,
         auth_enabled=False,
         **kw,
     )

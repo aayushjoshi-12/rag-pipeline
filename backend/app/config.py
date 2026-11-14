@@ -206,7 +206,7 @@ class Settings(BaseSettings):
 
     # ── File storage (local default; S3-compatible optional) + URL ingest (docs/configuration.md) ──
     storage_backend: str = "local"
-    #: Custom endpoint for S3-compatible stores (MinIO, Ceph, ...). Empty = AWS.
+    #: Custom endpoint for S3-compatible stores (Floci, MinIO, R2, Ceph, ...). Empty = AWS.
     s3_endpoint_url: str = ""
     s3_bucket: str = ""
     s3_region: str = "us-east-1"

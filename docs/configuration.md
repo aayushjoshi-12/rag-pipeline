@@ -41,7 +41,7 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
 | `CHROMA_COLLECTION` | string | `documents` | deployment | Collection holding the vectors, so several deployments can share one Chroma server. |
 | `PARSE_NORMALIZE_TEXT` | `true`, `false` | `true` | index-time | Fold PDF/Word/text extraction quirks before chunking: Latin ligatures (`ﬁ ﬂ ﬀ ﬃ ﬄ` -> `fi fl ff ffi ffl`), no-break/thin/ideographic spaces -> space, soft hyphen and zero-width characters removed, curly quotes -> `'` `"`, canonical (NFC) composition. Deliberately **not** NFKC: superscripts, fractions, `™`, full-width forms, CJK and dashes are left as extracted. See [Text normalisation](#text-normalisation). |
 | `STORAGE_BACKEND` | `local`, `s3` | `local` | deployment (per document: `documents.storage_backend`) | Where uploaded / downloaded source files are kept. `local` = `DATA_DIR/uploads/<id>/<name>`. `s3` = any S3-compatible store through boto3. Existing documents stay where they were written. See [File storage and URL ingest](#file-storage-and-url-ingest). |
-| `S3_ENDPOINT_URL` | http(s) URL or empty | empty (= AWS) | deployment | Endpoint of an S3-compatible store (MinIO: `http://minio:9000`). Path-style addressing is used when set. |
+| `S3_ENDPOINT_URL` | http(s) URL or empty | empty (= AWS) | deployment | Endpoint of an S3-compatible store (Floci: `http://floci:4566`). Path-style addressing is used when set. |
 | `S3_BUCKET` | string | empty | deployment | Bucket for `STORAGE_BACKEND=s3` (required then) and the default bucket `s3://` links may read. |
 | `S3_REGION` | string | `us-east-1` | deployment | Signing region. |
 | `S3_PREFIX` | key prefix | `rag-pipeline/` | deployment | Everything the app writes lives under `<prefix>uploads/<32 hex>/<name>`; it never lists, reads (storage) or deletes anything outside it. |
@@ -213,11 +213,12 @@ file: for S3 the object is downloaded to a temp file for the duration of the par
   references. S3 (only when `STORAGE_BACKEND=s3`) = objects that are under `S3_PREFIX`, have exactly the shape
   `uploads/<32 hex>/<name>`, are referenced by no `s3` document and are older than the age limit. Anything else in
   the bucket (other prefixes, other key shapes, other tenants) is never listed for deletion.
-* **Local MinIO**: `docker compose --profile s3 up -d minio` starts a real MinIO on `:9000` (console `:9001`) with
-  bucket `$S3_BUCKET` (default `rag-documents`). The default `docker compose up` does not start it. MinIO no longer
-  publishes images to Docker Hub/Quay, so the profile uses the last public Bitnami build (`MINIO_IMAGE` overrides it).
-  Containers must reach it as `http://minio:9000`: set `S3_ENDPOINT_URL_DOCKER=http://minio:9000` (and
-  `S3_ENDPOINT_URL=http://localhost:9000` for host-run tools/tests).
+* **Local S3 emulator (Floci)**: `docker compose --profile s3 up -d floci floci-init` starts [Floci](https://floci.io), a
+  free MIT-licensed AWS emulator (~40 MiB idle, S3 on `:4566`, any credentials accepted), and creates the bucket
+  `$S3_BUCKET` (default `rag-documents`) with `python -m app.manage ensure-bucket`. The default `docker compose up` does
+  not start it. Containers reach it as `http://floci:4566`: set `S3_ENDPOINT_URL_DOCKER=http://floci:4566` (and
+  `S3_ENDPOINT_URL=http://localhost:4566` for host-run tools/tests), with any `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`
+  (e.g. `test`). `FLOCI_IMAGE` overrides the image. It replaced MinIO, which no longer publishes a maintained image.
 * **Kubernetes**: with `STORAGE_BACKEND=s3` the api and worker no longer share a ReadWriteMany uploads volume.
 
 ### Ingest from a link: `POST /documents/from-url`

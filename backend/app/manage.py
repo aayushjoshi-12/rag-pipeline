@@ -98,6 +98,28 @@ def rebuild_index() -> str:
     return "index rebuilt"
 
 
+def _ensure_bucket(wait: int) -> int:
+    import time
+
+    from app.config import Settings
+    from app.services.storage import ensure_bucket
+
+    cfg = Settings()
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            print(f"bucket {cfg.s3_bucket}: {ensure_bucket(cfg)}")
+            return 0
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        except Exception as exc:  # emulator still starting, or a real failure once the deadline passes
+            if time.monotonic() >= deadline:
+                print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
+                return 1
+            time.sleep(2)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m app.manage")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -110,8 +132,12 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("fts-status", help="show configured vs stored keyword-search configuration")
     sub.add_parser("rebuild-fts", help="recreate the keyword-search columns/index with RETRIEVAL_FTS_CONFIG")
     sub.add_parser("rebuild-index", help="rebuild the pgvector ANN index on the current rows")
+    eb = sub.add_parser("ensure-bucket", help="create S3_BUCKET if it does not exist (local S3 emulators)")
+    eb.add_argument("--wait", type=int, default=0, help="retry for up to N seconds while the store starts")
     args = parser.parse_args(argv)
 
+    if args.command == "ensure-bucket":
+        return _ensure_bucket(args.wait)
     if args.command == "vector-status":
         info = asyncio.run(vector_status())
         print(json.dumps(info, indent=2, default=str))
