@@ -144,3 +144,33 @@ def test_dev_overlay_includes_ollama_and_prod_has_ingress() -> None:
     ing = by_kind(prod, "Ingress")["rag-pipeline"]
     backend = ing["spec"]["rules"][0]["http"]["paths"][0]["backend"]["service"]
     assert backend["name"] in by_kind(prod, "Service")
+
+
+def test_service_links_are_disabled_everywhere(docs: list[dict[str, Any]]) -> None:
+    # Found on a real cluster: a Service named `chroma` injects CHROMA_PORT=tcp://ip:8000 into pods
+    # in the namespace, and the chroma server crashed parsing it as its own CHROMA_PORT setting.
+    for name, tpl in pod_specs(docs).items():
+        assert tpl["spec"].get("enableServiceLinks") is False, name
+
+
+def test_chroma_volume_is_mounted_where_the_image_persists() -> None:
+    # Found on a real cluster: chromadb/chroma persists to /data; a PVC mounted elsewhere looks fine
+    # but every vector is lost when the pod restarts.
+    for overlay in ("dev", "prod", "kind"):
+        tpl = pod_specs(render(overlay))["chroma"]["spec"]["containers"][0]
+        assert {m["mountPath"] for m in tpl["volumeMounts"]} == {"/data"}, overlay
+
+
+def test_kind_overlay_is_self_consistent() -> None:
+    docs = render("kind")
+    # real secrets are created out of band, never overwritten by placeholders on apply
+    assert "rag-pipeline-secrets" not in by_kind(docs, "Secret")
+    assert "ollama" not in by_kind(docs, "Service")  # host Ollama is used instead
+    cfg = by_kind(docs, "ConfigMap")["rag-pipeline-config"]["data"]
+    assert cfg["OLLAMA_BASE_URL"] == "http://host.docker.internal:11434"
+    pvc = by_kind(docs, "PersistentVolumeClaim")["rag-pipeline-uploads"]
+    assert pvc["spec"]["accessModes"] == ["ReadWriteOnce"]
+    for name, tpl in pod_specs(docs).items():
+        for c in tpl["spec"]["containers"]:
+            if c["image"].startswith("rag-pipeline/"):
+                assert c["image"].endswith(":kind"), name

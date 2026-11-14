@@ -22,6 +22,8 @@ spec:
         fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
+      # Service-link env vars (CHROMA_PORT=tcp://...) collide with CHROMA_*/REDIS_* settings; we use DNS.
+      enableServiceLinks: false
       containers:
         - name: api
           image: rag-pipeline/backend:latest

@@ -23,6 +23,33 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       restartPolicy: OnFailure
+      # Service-link env vars (CHROMA_PORT=tcp://...) collide with CHROMA_*/REDIS_* settings; we use DNS.
+      enableServiceLinks: false
+      # `kubectl apply -k` starts Postgres and this Job together; on a real cluster the first run
+      # exhausted its backoff before the db accepted connections. Wait for the port instead.
+      initContainers:
+        - name: wait-for-db
+          image: rag-pipeline/backend:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -c
+            - |
+              import socket, time
+              for _ in range(120):
+                  try:
+                      socket.create_connection(("db", 5432), 2).close(); break
+                  except OSError:
+                      time.sleep(2)
+              else:
+                  raise SystemExit("db not reachable")
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+            limits: {cpu: 100m, memory: 128Mi}
       containers:
         - name: migrate
           image: rag-pipeline/backend:latest

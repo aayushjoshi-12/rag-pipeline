@@ -23,6 +23,8 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       terminationGracePeriodSeconds: 120   # let an in-flight ingest finish (warm shutdown)
+      # Service-link env vars (CHROMA_PORT=tcp://...) collide with CHROMA_*/REDIS_* settings; we use DNS.
+      enableServiceLinks: false
       containers:
         - name: worker
           image: rag-pipeline/backend:latest

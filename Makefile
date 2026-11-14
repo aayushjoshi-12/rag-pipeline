@@ -112,10 +112,12 @@ ENV ?= dev
 REGISTRY ?= rag-pipeline
 TAG ?= latest
 
-# Build both images for linux/amd64 (required when building on Apple Silicon for an x86 cluster).
+# Build both images for linux/amd64 by default (required when building on Apple Silicon for an x86
+# cluster). Override for a local arm64 cluster: `make images PLATFORM=linux/arm64 TAG=kind`.
+PLATFORM ?= linux/amd64
 images:
-	docker build --platform linux/amd64 -t $(REGISTRY)/backend:$(TAG) backend
-	docker build --platform linux/amd64 -f frontend/Dockerfile.prod -t $(REGISTRY)/frontend:$(TAG) frontend
+	docker build --platform $(PLATFORM) -t $(REGISTRY)/backend:$(TAG) backend
+	docker build --platform $(PLATFORM) -f frontend/Dockerfile.prod -t $(REGISTRY)/frontend:$(TAG) frontend
 
 # Jobs are immutable, so the previous migrate Job is removed before re-applying; then wait for it.
 deploy:

@@ -1,0 +1,35 @@
+# Local kind cluster (arm64 or amd64 host). Build/load the images first - see docs/kubernetes-local.md.
+# Differences from dev: locally built `:kind` images, no in-cluster Ollama (uses the Ollama running on
+# the host, reachable from kind nodes as host.docker.internal) and a ReadWriteOnce uploads volume.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+images:
+  - name: rag-pipeline/backend
+    newTag: kind
+  - name: rag-pipeline/frontend
+    newTag: kind
+
+patches:
+  - target: {kind: PersistentVolumeClaim, name: rag-pipeline-uploads}
+    patch: |-
+      - op: replace
+        path: /spec/accessModes
+        value: [ReadWriteOnce]
+  - target: {kind: ConfigMap, name: rag-pipeline-config}
+    patch: |-
+      - op: replace
+        path: /data/OLLAMA_BASE_URL
+        value: http://host.docker.internal:11434
+  # The base Secret holds placeholders and `kubectl apply -k` would overwrite real values with them,
+  # so this overlay drops it: create `rag-pipeline-secrets` yourself (docs/kubernetes-local.md).
+  - target: {kind: Secret, name: rag-pipeline-secrets}
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: rag-pipeline-secrets

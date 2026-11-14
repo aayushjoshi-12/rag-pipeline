@@ -104,10 +104,13 @@ shared uploads volume) and `dev` / `prod` overlays (prod adds replicas, HPAs and
 an in-cluster Ollama component).
 
 ```bash
-make images REGISTRY=ghcr.io/you/rag-pipeline TAG=v0.1.0   # linux/amd64 builds
+make images REGISTRY=ghcr.io/you/rag-pipeline TAG=v0.1.0   # linux/amd64 builds (PLATFORM=linux/arm64 for local arm64)
 make deploy-dry ENV=prod                                      # render only
 make deploy ENV=dev                                           # delete+apply migrate job, apply, wait
 ```
+
+To try it on a laptop, follow [docs/kubernetes-local.md](docs/kubernetes-local.md) (kind, with a
+`k8s/overlays/kind` overlay that uses locally built images and the host's Ollama).
 
 Things you must provide: real values in `k8s/base/secrets.yaml` (including a random `SECRET_KEY` of 32+ characters — the API refuses to start in prod with a placeholder — and the bootstrap `ADMIN_*`) (use sealed-secrets/SOPS), image
 tags in the overlay, an ingress host/class, and a **ReadWriteMany** storage class for the uploads
@@ -141,9 +144,10 @@ Honest accounting of what has been exercised against real services versus only u
 | **Docker Compose, all services as containers** | `docker compose up --build`, requests through the containerised frontend | passed (Ollama must run on the host) |
 | Backend image size | 5.72 GB → 1.10 GB (torch removed via docling-slim; uv cache kept out of the layer; thin `chromadb-client` instead of the full server package); parsers + stack re-verified | passed (auth smoke 45/47: the 2 LLM-dependent checks hit the free-tier 429) |
 | Production frontend image (nginx) | built, served SPA routes and proxied `/api` to a live backend | passed |
-| Kubernetes manifests | rendered with `kubectl kustomize` and checked structurally by tests (references, selectors, ports, config keys) | **not applied to a cluster** — untested at runtime |
+| Kubernetes manifests (kind overlay) | applied to a real single-node kind cluster (arm64 images): all pods Ready, migrate Job (Alembic to 0004), login, upload -> worker ingest -> chunks -> retrieval through port-forward, api/worker shared uploads volume, pod-delete survival (api, worker, db, chroma, redis), 2 workers ingesting 6 docs. Found and fixed 2 real bugs and 1 hardening (service-link env crash of Chroma, Chroma volume at the wrong path losing vectors on restart, the first migrate Job run failed with its logs lost, a wait-for-db init container was added as a precaution, race not conclusively reproduced) | passed (chat answer not tested: no real LLM key; in-cluster Ollama component and the `prod` overlay were **not** applied; Ollama was the host's) |
+| Kubernetes HPA | metrics-server installed on kind; prod HPAs read live CPU (`4%/70%`) and raised replicas to `minReplicas` | scale-up under load **not measured** (8 GiB Docker VM could not take it); RWX across nodes **not tested** (single node) |
 | Auth + RBAC (users, roles, permissions) | real stack through the containerised frontend: 47 checks incl. real Chromium UI flows, forged/expired/wrong-key tokens, live role edits and deactivation | passed (no login rate-limiting; no per-user document ownership; tokens are not revocable before expiry beyond deactivation) |
-| Load / scale behaviour (HPA, many workers) | not measured | — |
+| Load / scale behaviour (many workers) | 2 workers on one laptop node only; 3 workers starved an 8 GiB Docker VM | not measured beyond that |
 
 Smoke-test scripts and reports are kept locally under `tmp/` (gitignored); the automated suite
 (`make check`) runs 250+ backend and 24 frontend tests with fakes for external services.

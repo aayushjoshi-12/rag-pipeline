@@ -18,6 +18,8 @@ spec:
       labels:
         app.kubernetes.io/component: ollama
     spec:
+      # Service-link env vars (CHROMA_PORT=tcp://...) collide with CHROMA_*/REDIS_* settings; we use DNS.
+      enableServiceLinks: false
       containers:
         - name: ollama
           image: ollama/ollama:latest

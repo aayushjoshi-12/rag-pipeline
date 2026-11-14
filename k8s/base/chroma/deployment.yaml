@@ -16,6 +16,8 @@ spec:
       labels:
         app.kubernetes.io/component: chroma
     spec:
+      # Service-link env vars (CHROMA_PORT=tcp://...) collide with CHROMA_*/REDIS_* settings; we use DNS.
+      enableServiceLinks: false
       containers:
         - name: chroma
           image: chromadb/chroma:latest
@@ -23,7 +25,9 @@ spec:
             - containerPort: 8000
           volumeMounts:
             - name: chroma-data
-              mountPath: /chroma/chroma
+              # chromadb/chroma persists to /data (persist_path in the image's /config.yaml).
+              # Mounting anywhere else silently loses every vector when the pod restarts.
+              mountPath: /data
           resources:
             requests:
               cpu: 250m
