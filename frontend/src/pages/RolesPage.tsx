@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { Icon } from '../components/Icon'
+import { Alert, Card, PageHeader } from '../components/ui'
 import type { PermissionInfo, Role } from '../types'
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -44,17 +46,16 @@ export default function RolesPage() {
     list.includes(perm) ? list.filter((p) => p !== perm) : [...list, perm]
 
   return (
-    <div>
-      <h1>Roles</h1>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
+    <div className="stack">
+      <PageHeader
+        title="Roles"
+        description="Bundle permissions into roles and assign them to users."
+      />
+      {error && <Alert>{error}</Alert>}
 
-      <section>
-        <h2>New role</h2>
+      <Card title="New role" description="Choose exactly the permissions this role should grant.">
         <form
+          className="form form-grid"
           onSubmit={(e) => {
             e.preventDefault()
             void act(async () => {
@@ -65,67 +66,104 @@ export default function RolesPage() {
             })
           }}
         >
-          <label>
-            Role name
-            <input value={name} onChange={(e) => setName(e.target.value)} required />
+          <label className="field">
+            <span className="field-label">Role name</span>
+            <input
+              className="input"
+              autoComplete="off"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+            />
           </label>
-          <label>
-            Description
-            <input value={description} onChange={(e) => setDescription(e.target.value)} />
+          <label className="field">
+            <span className="field-label">Description</span>
+            <input
+              className="input"
+              autoComplete="off"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </label>
-          <fieldset>
+          <fieldset className="fieldset span-all">
             <legend>Permissions</legend>
-            {catalogue.map((p) => (
-              <label key={p.name} title={p.description}>
-                <input
-                  type="checkbox"
-                  checked={picked.includes(p.name)}
-                  onChange={() => setPicked((cur) => toggle(cur, p.name))}
-                />{' '}
-                {p.name}
-              </label>
-            ))}
+            <div className="checks checks-grid">
+              {catalogue.map((p) => (
+                <label key={p.name} className="check" title={p.description}>
+                  <input
+                    type="checkbox"
+                    checked={picked.includes(p.name)}
+                    onChange={() => setPicked((cur) => toggle(cur, p.name))}
+                  />
+                  <span>{p.name}</span>
+                </label>
+              ))}
+            </div>
           </fieldset>
-          <button type="submit">Create role</button>
+          <div className="form-actions span-all">
+            <button type="submit" className="btn btn-primary">
+              Create role
+            </button>
+          </div>
         </form>
-      </section>
+      </Card>
 
-      <section>
-        <h2>Existing roles</h2>
-        {roles.map((r) => (
-          <fieldset key={r.id} aria-label={`role ${r.name}`}>
-            <legend>
-              {r.name} {r.is_builtin && <em>(built-in)</em>}
-            </legend>
-            <p>{r.description}</p>
-            {catalogue.map((p) => (
-              <label key={p.name} title={p.description}>
-                <input
-                  type="checkbox"
-                  checked={r.permissions.includes(p.name)}
-                  disabled={r.name === 'admin'}
-                  aria-label={`${r.name} ${p.name}`}
-                  onChange={() =>
-                    void act(() =>
-                      api.updateRole(r.id, { permissions: toggle(r.permissions, p.name) }),
-                    )
-                  }
-                />{' '}
-                {p.name}
-              </label>
-            ))}
-            {!r.is_builtin && (
-              <button
-                aria-label={`delete role ${r.name}`}
-                onClick={() => {
-                  if (window.confirm(`Delete role ${r.name}?`)) void act(() => api.deleteRole(r.id))
-                }}
-              >
-                Delete
-              </button>
-            )}
-          </fieldset>
-        ))}
+      <section className="stack" aria-labelledby="existing-roles">
+        <h2 id="existing-roles" className="section-title">
+          Role catalogue
+        </h2>
+        <div className="role-grid">
+          {roles.map((r) => (
+            <fieldset key={r.id} className="card role-card" aria-label={`role ${r.name}`}>
+              <legend className="sr-only">
+                {r.name} {r.is_builtin && <em>(built-in)</em>}
+              </legend>
+              <div className="card-head">
+                <div>
+                  <h3 className="card-title">{r.name}</h3>
+                  <p className="card-desc">{r.description || 'No description'}</p>
+                </div>
+                <div className="card-actions">
+                  {r.is_builtin ? (
+                    <span className="tag">
+                      <Icon name="lock" size={12} /> built-in
+                    </span>
+                  ) : (
+                    <button
+                      className="btn btn-ghost btn-danger-text btn-sm"
+                      aria-label={`delete role ${r.name}`}
+                      onClick={() => {
+                        if (window.confirm(`Delete role ${r.name}?`))
+                          void act(() => api.deleteRole(r.id))
+                      }}
+                    >
+                      <Icon name="trash" size={15} />
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="card-body checks checks-grid">
+                {catalogue.map((p) => (
+                  <label key={p.name} className="check" title={p.description}>
+                    <input
+                      type="checkbox"
+                      checked={r.permissions.includes(p.name)}
+                      disabled={r.name === 'admin'}
+                      aria-label={`${r.name} ${p.name}`}
+                      onChange={() =>
+                        void act(() =>
+                          api.updateRole(r.id, { permissions: toggle(r.permissions, p.name) }),
+                        )
+                      }
+                    />
+                    <span>{p.name}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ))}
+        </div>
       </section>
     </div>
   )

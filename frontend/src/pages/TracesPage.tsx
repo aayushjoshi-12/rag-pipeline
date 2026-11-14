@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { api } from '../api/client'
+import { Icon } from '../components/Icon'
+import { Alert, Card, EmptyState, PageHeader } from '../components/ui'
 import type { Trace } from '../types'
 
 const PAGE = 25
@@ -39,12 +41,16 @@ export default function TracesPage() {
       : `${t.prompt_tokens ?? 0} / ${t.completion_tokens ?? 0}`
 
   return (
-    <div>
-      <h1>Traces</h1>
-      <div className="filters">
-        <label>
-          Type
+    <div className="stack">
+      <PageHeader
+        title="Traces"
+        description="Every chat and ingest request, with timing, token use and errors."
+      />
+      <div className="toolbar">
+        <label className="field field-inline">
+          <span className="field-label">Type</span>
           <select
+            className="select"
             value={kind}
             onChange={(e) => {
               setKind(e.target.value)
@@ -56,9 +62,10 @@ export default function TracesPage() {
             <option value="ingest">Ingest</option>
           </select>
         </label>
-        <label>
-          Status
+        <label className="field field-inline">
+          <span className="field-label">Status</span>
           <select
+            className="select"
             value={status}
             onChange={(e) => {
               setStatus(e.target.value)
@@ -71,99 +78,122 @@ export default function TracesPage() {
           </select>
         </label>
       </div>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
-      {rows.length === 0 && !error ? (
-        <p>No traces yet — they appear after chats and ingests.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>User</th>
-              <th>Model</th>
-              <th>Duration</th>
-              <th>Tokens (in / out)</th>
-              <th>Hits</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((t) => (
-              <Fragment key={t.id}>
+      {error && <Alert>{error}</Alert>}
+      <Card flush>
+        {rows.length === 0 && !error ? (
+          <EmptyState icon="traces" title="No traces yet">
+            They appear after chats and ingests.
+          </EmptyState>
+        ) : (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
                 <tr>
-                  <td>
-                    <button
-                      className="linklike"
-                      aria-expanded={open === t.id}
-                      aria-label={`details ${t.id}`}
-                      onClick={() => setOpen(open === t.id ? null : t.id)}
-                    >
-                      {new Date(t.created_at + 'Z').toLocaleString()}
-                    </button>
-                  </td>
-                  <td>{t.kind}</td>
-                  <td>
-                    <span className={t.status === 'ok' ? 'badge badge-ok' : 'badge badge-failed'}>
-                      {t.status === 'ok' ? '✓ ok' : '✕ error'}
-                    </span>
-                  </td>
-                  <td>{t.user_email ?? '—'}</td>
-                  <td>{t.model ?? '—'}</td>
-                  <td>{t.duration_ms.toLocaleString()} ms</td>
-                  <td>{tokens(t)}</td>
-                  <td>{t.hits ?? '—'}</td>
+                  <th>Time</th>
+                  <th>Type</th>
+                  <th>Status</th>
+                  <th>User</th>
+                  <th>Model</th>
+                  <th className="num-col">Duration</th>
+                  <th className="num-col">Tokens (in / out)</th>
+                  <th className="num-col">Hits</th>
                 </tr>
-                {open === t.id && (
-                  <tr>
-                    <td colSpan={8}>
-                      <dl>
-                        {t.error && (
-                          <>
-                            <dt>Error</dt>
-                            <dd role="alert" className="error">
-                              {t.error}
+              </thead>
+              <tbody>
+                {rows.map((t) => (
+                  <Fragment key={t.id}>
+                    <tr className={open === t.id ? 'is-open' : undefined}>
+                      <td className="nowrap">
+                        <button
+                          className="row-toggle num"
+                          aria-expanded={open === t.id}
+                          aria-label={`details ${t.id}`}
+                          onClick={() => setOpen(open === t.id ? null : t.id)}
+                        >
+                          <Icon name="chevron" size={14} className="row-chevron" />
+                          {new Date(t.created_at + 'Z').toLocaleString()}
+                        </button>
+                      </td>
+                      <td>
+                        <span className="tag">{t.kind}</span>
+                      </td>
+                      <td>
+                        <span
+                          className={t.status === 'ok' ? 'badge badge-ok' : 'badge badge-failed'}
+                        >
+                          {t.status === 'ok' ? '✓ ok' : '✕ error'}
+                        </span>
+                      </td>
+                      <td className="cell-trunc muted" title={t.user_email ?? undefined}>
+                        {t.user_email ?? '—'}
+                      </td>
+                      <td className="cell-trunc muted" title={t.model ?? undefined}>
+                        {t.model ?? '—'}
+                      </td>
+                      <td className="num-col nowrap">{t.duration_ms.toLocaleString()} ms</td>
+                      <td className="num-col nowrap">{tokens(t)}</td>
+                      <td className="num-col">{t.hits ?? '—'}</td>
+                    </tr>
+                    {open === t.id && (
+                      <tr className="detail-row">
+                        <td colSpan={8}>
+                          <dl className="detail-list">
+                            {t.error && (
+                              <>
+                                <dt>Error</dt>
+                                <dd role="alert" className="detail-error">
+                                  {t.error}
+                                </dd>
+                              </>
+                            )}
+                            {t.question && (
+                              <>
+                                <dt>Question</dt>
+                                <dd>{t.question}</dd>
+                              </>
+                            )}
+                            {t.document_id && (
+                              <>
+                                <dt>Document</dt>
+                                <dd className="mono">{t.document_id}</dd>
+                              </>
+                            )}
+                            <dt>Details</dt>
+                            <dd>
+                              <code>{JSON.stringify(t.meta)}</code>
                             </dd>
-                          </>
-                        )}
-                        {t.question && (
-                          <>
-                            <dt>Question</dt>
-                            <dd>{t.question}</dd>
-                          </>
-                        )}
-                        {t.document_id && (
-                          <>
-                            <dt>Document</dt>
-                            <dd>{t.document_id}</dd>
-                          </>
-                        )}
-                        <dt>Details</dt>
-                        <dd>
-                          <code>{JSON.stringify(t.meta)}</code>
-                        </dd>
-                      </dl>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      )}
-      <p>
-        {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE, total)} of {total}{' '}
-        <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>
-          Previous
-        </button>{' '}
-        <button disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>
-          Next
-        </button>
-      </p>
+                          </dl>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <div className="pager">
+          <span className="muted num">
+            {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE, total)} of {total}
+          </span>
+          <div className="pager-btns">
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={offset === 0}
+              onClick={() => setOffset(Math.max(0, offset - PAGE))}
+            >
+              Previous
+            </button>
+            <button
+              className="btn btn-secondary btn-sm"
+              disabled={offset + PAGE >= total}
+              onClick={() => setOffset(offset + PAGE)}
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      </Card>
     </div>
   )
 }

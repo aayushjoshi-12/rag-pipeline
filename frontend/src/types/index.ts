@@ -61,6 +61,8 @@ export interface Source {
   chunk_index: number
   filename: string
   score: number
+  /** False for neighbouring context chunks (absent on older servers: treat as a hit). */
+  is_hit?: boolean
 }
 
 export interface ChatResponse {

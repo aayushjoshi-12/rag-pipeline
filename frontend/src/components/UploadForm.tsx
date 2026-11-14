@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react'
 import { api } from '../api/client'
 import { useStore } from '../store'
+import { Dropzone } from './Dropzone'
 import { JobTracker } from './JobTracker'
+import { Alert, Card } from './ui'
 
 interface Tracked {
   jobId: string
@@ -42,25 +44,32 @@ export function UploadForm() {
   const onSettled = () => void refresh()
 
   return (
-    <section>
-      <form onSubmit={(e) => void onSubmit(e)} className="upload">
-        <label>
-          Document
-          <input ref={input} type="file" multiple accept=".pdf,.docx,.txt,.md" />
-        </label>
-        <button type="submit" disabled={uploading}>
-          {uploading ? 'Uploading…' : 'Upload'}
-        </button>
-        {uploading && <progress aria-label="uploading" />}
+    <Card
+      title="Upload files"
+      description="Files are parsed, chunked and embedded in the background."
+    >
+      <form onSubmit={(e) => void onSubmit(e)} className="form" onChange={() => setError(null)}>
+        <Dropzone
+          inputRef={input}
+          label="Document"
+          multiple
+          prompt="Drop files here or click to browse"
+        />
+        <div className="form-actions">
+          <button type="submit" className="btn btn-primary" disabled={uploading}>
+            {uploading ? 'Uploading…' : 'Upload'}
+          </button>
+          {uploading && <progress className="progress" aria-label="uploading" />}
+        </div>
       </form>
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
+      {error && <Alert>{error}</Alert>}
+      {tracked.length > 0 && (
+        <div className="jobs">
+          {tracked.map((t) => (
+            <JobTracker key={t.jobId} jobId={t.jobId} filename={t.filename} onSettled={onSettled} />
+          ))}
+        </div>
       )}
-      {tracked.map((t) => (
-        <JobTracker key={t.jobId} jobId={t.jobId} filename={t.filename} onSettled={onSettled} />
-      ))}
-    </section>
+    </Card>
   )
 }

@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { useCan } from '../store/auth'
+import { Alert } from './ui'
 
 /** Renders children only when the user holds the permission; otherwise an explicit notice
  * (so a deep link to a forbidden page explains itself instead of showing a blank page). */
@@ -11,11 +12,6 @@ export function RequirePermission({
   children: ReactNode
 }) {
   const allowed = useCan(permission)
-  if (!allowed)
-    return (
-      <p role="alert" className="error">
-        You do not have permission to view this page ({permission}).
-      </p>
-    )
+  if (!allowed) return <Alert>You do not have permission to view this page ({permission}).</Alert>
   return <>{children}</>
 }

@@ -2,6 +2,7 @@ import { useJobPolling } from '../hooks'
 import { useStore } from '../store'
 import type { Job } from '../types'
 import { StatusBadge } from './StatusBadge'
+import { Alert } from './ui'
 
 const STEPS = ['pending', 'running', 'done'] as const
 
@@ -24,22 +25,25 @@ export function JobTracker({
   return (
     <div className="job" aria-label={`job ${filename}`}>
       <div className="job-head">
-        <span>{filename}</span>
+        <span className="truncate job-name" title={filename}>
+          {filename}
+        </span>
         <StatusBadge status={status} />
       </div>
-      <progress value={pct} max={100} aria-label={`progress ${filename}`} />
+      <progress
+        className={`progress progress-${status}`}
+        value={pct}
+        max={100}
+        aria-label={`progress ${filename}`}
+      />
       {job?.stats && status === 'done' && (
-        <p className="stats" data-testid="job-stats">
+        <p className="stats muted small" data-testid="job-stats">
           {job.stats.mode === 'incremental'
             ? `Updated: re-embedded ${job.stats.embedded} of ${job.stats.chunks_total} chunks (${job.stats.kept} unchanged, ${job.stats.removed} removed)`
             : `Indexed ${job.stats.chunks_total} chunks`}
         </p>
       )}
-      {job?.error && (
-        <p role="alert" className="error">
-          {job.error}
-        </p>
-      )}
+      {job?.error && <Alert>{job.error}</Alert>}
     </div>
   )
 }
