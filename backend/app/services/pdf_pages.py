@@ -28,3 +28,23 @@ class PdfPageRenderer:
                 img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
                 images.append(img)
             return images
+
+
+def extract_native_texts(path: Path) -> list[str]:
+    """The text layer of every page (empty string for pages without one), in page order."""
+    with _RENDER_LOCK, pymupdf.open(str(path)) as doc:  # type: ignore[no-untyped-call]  # pymupdf ships no type hints
+        return [str(page.get_text("text")) for page in doc]
+
+
+def render_pages(path: Path, indices: list[int], dpi: int) -> dict[int, Image.Image]:
+    """Render only the given zero-based pages (the ones that need OCR/vision)."""
+    if dpi <= 0:
+        raise ValueError("dpi must be positive")
+    wanted = set(indices)
+    out: dict[int, Image.Image] = {}
+    with _RENDER_LOCK, pymupdf.open(str(path)) as doc:  # type: ignore[no-untyped-call]  # pymupdf ships no type hints
+        for i, page in enumerate(doc):
+            if i in wanted:
+                pix = page.get_pixmap(dpi=dpi)
+                out[i] = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+    return out

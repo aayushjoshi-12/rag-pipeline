@@ -225,6 +225,11 @@ class Settings(BaseSettings):
     parser_max_completion_tokens: int = 16032
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     pdf_dpi: int = 300
+    #: Where PDF page text comes from: ``auto`` = the PDF's own text layer when a page has enough
+    #: text, else OCR/vision for that page; ``native`` = text layer only; ``image`` = always OCR/vision.
+    pdf_text_source: str = "auto"
+    #: A page whose text layer is shorter than this (after stripping) is treated as scanned.
+    pdf_native_min_chars: int = 40
     ocr_lang: str = "eng"
     tesseract_cmd: str | None = None
     docx_reader: str = "docling"
@@ -245,6 +250,10 @@ class Settings(BaseSettings):
             raise SettingsError(f"Unknown vector store '{self.vector_store}'.")
         if self.parser_provider not in ("openrouter", "openai", "anthropic", "ocr"):
             raise SettingsError(f"Unknown parser provider '{self.parser_provider}'.")
+        if self.pdf_text_source not in ("auto", "native", "image"):
+            raise SettingsError(f"Unknown pdf_text_source '{self.pdf_text_source}'.")
+        if self.pdf_native_min_chars < 0:
+            raise SettingsError("pdf_native_min_chars must be >= 0.")
         if self.docx_reader not in ("docling",):
             raise SettingsError(f"Unknown DOCX reader '{self.docx_reader}'.")
         if self.access_token_minutes <= 0 or self.refresh_token_days <= 0:

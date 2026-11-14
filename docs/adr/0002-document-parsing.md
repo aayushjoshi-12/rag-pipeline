@@ -39,9 +39,13 @@ Explored alternatives for DOCX: `mammoth` (docx→HTML, extra conversion step, w
 `markitdown` (lighter, weaker layout), `unstructured` (heavy, PDF parsing historically flaky).
 Docling was kept for DOCX→MD fidelity and active maintenance.
 
-Note: docling also does strong native-text PDF extraction. We keep image → OCR/vision for PDFs,
-but native extraction (docling or PyMuPDF `get_text`) is a candidate config-selectable option
-for born-digital PDFs — see **Future option**.
+**Native text first (ticket 30).** A born-digital PDF already carries an exact text layer, so
+`PDF_TEXT_SOURCE=auto` (default) uses it per page when the page has at least `PDF_NATIVE_MIN_CHARS`
+(40) characters and sends only pages without one (scans) to the configured OCR/vision backend. The
+backend is built lazily, so an all-text PDF needs no API key and no LLM/OCR call. `native` never
+calls a backend (scanned pages come back empty); `image` always renders and OCRs/vision-reads every
+page (the pre-ticket-30 behaviour). On the real Selling Guide chapter (44 pages) native extraction
+parses in seconds and avoids Tesseract noise (bullets read as `e`/`¢`, reflowed tables).
 
 ## Out of scope (explicit)
 
@@ -83,6 +87,8 @@ in prod — same three-layer rule as the rest of the app).
 | PDF render DPI | `PDF_DPI` | `300` | PyMuPDF page render resolution feeding OCR/vision |
 | OCR language | `OCR_LANG` | `eng` | Tesseract `lang` for the `ocr` provider |
 | Tesseract binary | `TESSERACT_CMD` | `""` | Override tesseract path (else system default) |
+| PDF text source | `PDF_TEXT_SOURCE` | `auto` | `auto` (text layer per page, OCR/vision for scanned pages) \| `native` \| `image` |
+| Native min chars | `PDF_NATIVE_MIN_CHARS` | `40` | pages with a shorter text layer are treated as scanned |
 | DOCX reader | `DOCX_READER` | `docling` | DOCX → markdown reader (`docling`; alternatives config-selectable later) |
 
 Future knob (see *Future option*): the PDF reader strategy (`image` vs `native` text

@@ -15,7 +15,7 @@ from app.config import Settings
 from app.services.backends import BaseBackend, get_parser_backend
 from app.services.langfuse import configure_from_settings
 from app.services.parse_errors import DocumentLoadError, UnsupportedFileTypeError
-from app.services.pdf_pages import PdfPageRenderer
+from app.services.pdf_pages import PdfPageRenderer, extract_native_texts, render_pages
 from app.services.retry import with_retry
 
 logger = logging.getLogger(__name__)
@@ -73,40 +73,63 @@ def _parse_pdf(
     provider: str | None,
     backend: BaseBackend | None,
 ) -> ParseResult:
+    """PDF → per-page text.
+
+    ``auto`` (default) takes a page's own text layer when it has enough text and only sends pages
+    without one (scans) to the OCR/vision backend, which is built lazily — a born-digital PDF needs
+    no API key and no OCR. ``native`` never calls a backend; ``image`` always does.
+    """
+    mode = cfg.pdf_text_source
     try:
-        pages = PdfPageRenderer(dpi=cfg.pdf_dpi).load(path)
+        native = extract_native_texts(path) if mode != "image" else None
+        if native is None:
+            page_total = len(PdfPageRenderer(dpi=cfg.pdf_dpi).load(path))  # validates + counts
+            texts: list[str | None] = [None] * page_total
+        else:
+            page_total = len(native)
+            texts = [
+                t.strip() if (mode == "native" or len(t.strip()) >= cfg.pdf_native_min_chars) else None
+                for t in native
+            ]
+        need = [i for i, t in enumerate(texts) if t is None]
+        images = render_pages(path, need, cfg.pdf_dpi) if need else {}
     except Exception as exc:
         raise DocumentLoadError(f"Failed to load PDF {path}: {exc}") from exc
 
-    _backend = backend or get_parser_backend(provider=provider, settings=cfg)
-    page_texts: list[str] = []
-    for i, page in enumerate(pages, 1):
-        logger.debug("Extracting text from page %d/%d via %s", i, len(pages), _backend.name)
+    _backend: BaseBackend | None = None
+    for i in need:
+        if _backend is None:
+            _backend = backend or get_parser_backend(provider=provider, settings=cfg)
+        logger.debug("Extracting text from page %d/%d via %s", i + 1, page_total, _backend.name)
         try:
             # Retry transient backend failures (timeouts + translated call errors,
             # incl. free-tier models returning empty/missing completions) per page.
-            text = with_retry(_backend.extract_text, page)
+            texts[i] = with_retry(_backend.extract_text, images[i])
         except Exception as exc:
             raise DocumentLoadError(
-                f"{_backend.name} backend failed on page {i} of {path}: {exc}"
+                f"{_backend.name} backend failed on page {i + 1} of {path}: {exc}"
             ) from exc
-        logger.debug("Page %d: %d chars", i, len(text))
-        page_texts.append(text)
+        logger.debug("Page %d: %d chars", i + 1, len(texts[i] or ""))
 
+    page_texts = [t or "" for t in texts]
     text = _PAGE_SEPARATOR.join(page_texts)
+    native_pages = page_total - len(need)
+    if _backend is None:
+        used = "native"
+    elif native_pages:
+        used = f"native+{_backend.name}"
+    else:
+        used = _backend.name
     logger.info(
-        "Parsed PDF %s via %s: %d page(s), %d chars",
-        path.name,
-        _backend.name,
-        len(pages),
-        len(text),
+        "Parsed PDF %s via %s: %d page(s) (%d native, %d via backend), %d chars",
+        path.name, used, page_total, native_pages, len(need), len(text),
     )
     return ParseResult(
         text=text,
         format="text",
         filetype="pdf",
-        provider=_backend.name,
-        page_count=len(pages),
+        provider=used,
+        page_count=page_total,
         page_texts=page_texts,
     )
 
