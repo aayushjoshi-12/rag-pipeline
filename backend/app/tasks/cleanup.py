@@ -8,6 +8,7 @@ from sqlalchemy.pool import NullPool
 
 from app.celery_app import celery_app
 from app.config import Settings
+from app.services import traces
 from app.services.cleanup import cleanup_orphan_uploads
 
 logger = structlog.get_logger(__name__)
@@ -21,6 +22,9 @@ async def _run() -> int:
             removed = await cleanup_orphan_uploads(
                 session, settings.data_dir, min_age_hours=settings.cleanup_orphan_age_hours
             )
+            purged = await traces.purge_older_than(session, settings.trace_retention_days)
+            if purged:
+                logger.info("traces_purged", count=purged)
             return len(removed)
     finally:
         await engine.dispose()

@@ -33,6 +33,7 @@ export const ALL_PERMISSIONS = [
   'documents:delete',
   'jobs:read',
   'chat:use',
+  'traces:read',
   'users:manage',
   'roles:manage',
 ]

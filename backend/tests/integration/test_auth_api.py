@@ -33,6 +33,9 @@ GUARDED: list[tuple[str, str, Permission]] = [
     ("DELETE", f"/documents/{FAKE_ID}", Permission.DOCUMENTS_DELETE),
     ("GET", f"/jobs/{FAKE_ID}", Permission.JOBS_READ),
     ("POST", "/chat", Permission.CHAT_USE),
+    ("GET", "/traces", Permission.TRACES_READ),
+    ("GET", f"/traces/{FAKE_ID}", Permission.TRACES_READ),
+    ("GET", "/usage", Permission.TRACES_READ),
     ("GET", "/users", Permission.USERS_MANAGE),
     ("POST", "/users", Permission.USERS_MANAGE),
     ("PATCH", f"/users/{FAKE_ID}", Permission.USERS_MANAGE),
@@ -251,3 +254,31 @@ async def test_auth_disabled_allows_everything(isolated_session: AsyncSession, t
             assert set(me["permissions"]) == set(ALL)
     finally:
         app.dependency_overrides.clear()
+
+
+async def test_traces_and_usage_endpoints(env: Env) -> None:
+    from app.services import traces
+
+    _, reader = await env.make_user(["traces:read"])
+    for i in range(3):
+        await traces.record(env.session, kind="chat", status="ok" if i else "error",
+                            duration_ms=100 * (i + 1), prompt_tokens=10, completion_tokens=2,
+                            error="boom" if not i else None)
+    c = env.client
+    page = (await c.get("/traces?kind=chat&limit=2", headers=reader)).json()
+    assert page["total"] >= 3 and len(page["items"]) == 2
+    only_err = (await c.get("/traces?status=error&kind=chat", headers=reader)).json()
+    assert only_err["total"] >= 1 and all(t["status"] == "error" for t in only_err["items"])
+    one = await c.get(f"/traces/{page['items'][0]['id']}", headers=reader)
+    assert one.status_code == 200 and one.json()["id"] == page["items"][0]["id"]
+    assert (await c.get(f"/traces/{FAKE_ID}", headers=reader)).status_code == 404
+    assert (await c.get("/traces?kind=bogus", headers=reader)).status_code == 422
+    assert (await c.get("/traces?status=bogus", headers=reader)).status_code == 422
+    assert (await c.get("/traces?limit=0", headers=reader)).status_code == 422
+    assert (await c.get("/traces?limit=500", headers=reader)).status_code == 422
+    usage = (await c.get("/usage?days=3", headers=reader)).json()
+    assert len(usage) == 3 and usage[-1]["requests"] >= 3 and usage[-1]["errors"] >= 1
+    assert usage[-1]["prompt_tokens"] >= 30
+    assert (await c.get("/usage?days=0", headers=reader)).status_code == 422
+    assert (await c.get("/usage?days=91", headers=reader)).status_code == 422
+    assert (await c.get("/usage?kind=bogus", headers=reader)).status_code == 422

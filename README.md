@@ -26,9 +26,12 @@ question ─► API ─► embed query ─► Chroma similarity ─► LLM (grou
   relevant is found the LLM is not called.
 - **Observe** — Langfuse spans for every ingest stage and chat request; prompt/question content is
   only sent when `LANGFUSE_CAPTURE_CONTENT=true`. Structured JSON logs carry `job_id` / `chat_id`.
-- **Dashboard** — upload with live job status, document list/detail with chunks, chat with citations.
+- **Dashboard** — upload with live job status, document list/detail with chunks, chat with citations,
+  plus a Traces page (every chat and ingest run: status, duration, model, tokens, hits, error) and a
+  Usage page (requests, error rate, latency and LLM tokens per day). Question text is only stored in
+  traces when `TRACE_CAPTURE_CONTENT=true`; traces are purged after `TRACE_RETENTION_DAYS` (30).
 - **Access control** — JWT login with role-based access: admins define roles as sets of permissions
-  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `users:manage`, `roles:manage`) and assign
+  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `traces:read`, `users:manage`, `roles:manage`) and assign
   them to users. Permissions are checked server-side on every request and re-read from the database,
   so editing a role or deactivating a user takes effect immediately.
 - **Housekeeping** — a Celery beat task removes orphaned upload directories.
@@ -81,6 +84,7 @@ All routes except `/health` and `/auth/login|refresh` need a bearer token with t
 |---|---|---|
 | POST | `/auth/login`, `/auth/refresh` | email + password → access/refresh tokens; refresh |
 | GET | `/auth/me` | who am I + effective permissions |
+| GET | `/traces`, `/traces/{id}`, `/usage` | request/ingest trace log and per-day aggregates (`traces:read`) |
 | GET/POST/PATCH/DELETE | `/users`, `/roles` (`GET /permissions`) | admin: manage users, roles and their permissions (`users:manage`, `roles:manage`) |
 | POST | `/documents` | multipart upload → `{document, job}` (413 over the size limit, 415 for bad types) |
 | GET | `/documents`, `/documents/{id}`, `/documents/{id}/chunks` | list / detail with jobs / indexed chunks |
@@ -128,6 +132,7 @@ Honest accounting of what has been exercised against real services versus only u
 | Incremental update | real stack: edit 1 paragraph of a 126-chunk doc, `PUT` → **1** chunk re-embedded, 124 reused | passed |
 | Incremental update on real revisions | Fannie Mae Selling Guide ch. B3-5, Oct 8 → Nov 5 2025 (real PDFs, real OCR): `PUT` reused **173/342** chunks, embedded 169 (a rebuild embeds 342) | passed (answer check after the update not run: LLM rate-limited) |
 | Dashboard | real Chromium driving upload → live job → chat → delete | passed |
+| Traces + usage dashboard | real stack + real Chromium: real ingest (ok and corrupt-PDF failure), chat (LLM rate-limited → error traces), API/UI numbers cross-checked, charts reviewed in light/dark | passed (token chart with real token data not seen: LLM returned only 429s) |
 | Langfuse tracing | traces read back from a real Langfuse project | passed |
 | **Docker Compose, all services as containers** | `docker compose up --build`, requests through the containerised frontend | passed (Ollama must run on the host) |
 | Backend image size | 5.72 GB → 1.42 GB (torch removed via docling-slim; uv cache kept out of the layer); parsers + stack re-verified on the slim image | passed (auth smoke 45/47: the 2 LLM-dependent checks hit the free-tier 429) |

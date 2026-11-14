@@ -2,6 +2,7 @@ import type {
   ChatRequest,
   ChatResponse,
   Chunk,
+  DayUsage,
   Document,
   DocumentDetail,
   HealthResponse,
@@ -12,6 +13,8 @@ import type {
   Role,
   RoleInput,
   TokenPair,
+  Trace,
+  TracePage,
   UploadResponse,
   UserCreateInput,
   UserUpdateInput,
@@ -106,6 +109,18 @@ export const api = {
       body: JSON.stringify({ email, password }),
     }),
   me: () => request<Me>('/auth/me'),
+  listTraces: (
+    params: { kind?: string; status?: string; limit?: number; offset?: number } = {},
+  ) => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(params))
+      if (v !== undefined && v !== '') q.set(k, String(v))
+    const qs = q.toString()
+    return request<TracePage>(`/traces${qs ? `?${qs}` : ''}`)
+  },
+  getTrace: (id: string) => request<Trace>(`/traces/${id}`),
+  usage: (days = 14, kind = '') =>
+    request<DayUsage[]>(`/usage?days=${days}${kind ? `&kind=${kind}` : ''}`),
   listPermissions: () => request<PermissionInfo[]>('/permissions'),
   listUsers: () => request<ManagedUser[]>('/users'),
   createUser: (input: UserCreateInput) =>

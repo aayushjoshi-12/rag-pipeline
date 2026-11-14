@@ -9,6 +9,7 @@ on the ``content_hash`` / ``chunker_fingerprint`` stored in each chunk's metadat
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -22,7 +23,7 @@ from app.db import ops
 from app.db.enums import DocumentStatus, JobStatus
 from app.db.models import Document
 from app.observability import log_context
-from app.services import observability
+from app.services import observability, traces
 from app.services.chunking import ChunkSpec, chunk_text
 from app.services.embeddings import Embedder
 from app.services.incremental import old_chunks_from_rows, plan_update, vector_id
@@ -66,11 +67,29 @@ async def ingest_document(
 ) -> JobStatus:
     """Run the ingest for ``job_id``. Never raises; the outcome lives on the job row."""
     with log_context(job_id=str(job_id)), observability.span("ingest.document", job_id=str(job_id)) as root:
+        started = time.perf_counter()
         status = await _ingest(job_id, session, settings, parse_fn, embedder, store)
+        await _record_trace(job_id, status, started, session, settings)
         root.update(output=status.value)
         if status != JobStatus.DONE:
             root.update(level="ERROR", status_message="ingest failed")
         return status
+
+
+async def _record_trace(
+    job_id: uuid.UUID, status: JobStatus, started: float, session: AsyncSession, settings: Settings
+) -> None:
+    job = await ops.get_job(job_id, session=session)
+    await traces.record(
+        session,
+        kind="ingest",
+        status="ok" if status == JobStatus.DONE else "error",
+        duration_ms=int((time.perf_counter() - started) * 1000),
+        document_id=job.document_id if job else None,
+        model=settings.embedding_model,
+        error=job.error if job else None,
+        meta=dict(job.stats or {}) if job else {},
+    )
 
 
 async def _ingest(

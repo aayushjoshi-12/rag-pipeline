@@ -181,6 +181,10 @@ class Settings(BaseSettings):
     #: exceed this share of the old chunk count. None (default) = always update incrementally,
     #: which never embeds more than a rebuild.
     incremental_max_churn: float | None = None
+    #: Store chat question text in the trace log (off by default: questions can be sensitive).
+    trace_capture_content: bool = False
+    #: Traces older than this many days are purged by the scheduled cleanup task.
+    trace_retention_days: int = 30
 
     # ── Persistence ──────────────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
@@ -267,6 +271,8 @@ class Settings(BaseSettings):
             )
         if self.incremental_max_churn is not None and self.incremental_max_churn < 0:
             raise SettingsError("incremental_max_churn must be >= 0 (or unset).")
+        if self.trace_retention_days < 1:
+            raise SettingsError("trace_retention_days must be >= 1.")
         if self.cleanup_orphan_age_hours < 0:
             raise SettingsError("cleanup_orphan_age_hours must be >= 0.")
         self._warn_langfuse()

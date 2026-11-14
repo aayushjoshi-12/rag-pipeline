@@ -12,6 +12,7 @@ import respx
 from app.config import Settings
 from app.services.llm import (
     AnthropicLLM,
+    Completion,
     LLMConfigError,
     LLMRequestError,
     LLMUnavailableError,
@@ -38,11 +39,28 @@ def _chunk(text: str = "alpha", idx: int = 0) -> ChunkResult:
 
 
 @respx.mock
+def test_openai_compat_reports_provider_token_counts_or_none() -> None:
+    respx.post(URL).mock(
+        return_value=Response(
+            200,
+            json={
+                "choices": [{"message": {"content": "ok"}}],
+                "usage": {"prompt_tokens": 123, "completion_tokens": 45, "total_tokens": 168},
+            },
+        )
+    )
+    done = _llm().complete("s", "u")
+    assert done == Completion("ok", 123, 45)
+    respx.post(URL).mock(return_value=Response(200, json={"choices": [{"message": {"content": "ok"}}]}))
+    assert _llm().complete("s", "u") == Completion("ok", None, None)
+
+
+@respx.mock
 def test_openai_compat_returns_text_and_sends_messages() -> None:
     route = respx.post(URL).mock(
         return_value=Response(200, json={"choices": [{"message": {"content": "42"}}]})
     )
-    assert _llm().complete("sys", "usr") == "42"
+    assert _llm().complete("sys", "usr").text == "42"
     body = json.loads(route.calls.last.request.content)
     assert body["messages"] == [
         {"role": "system", "content": "sys"},
@@ -106,7 +124,8 @@ def test_anthropic_llm_round_trip() -> None:
         )
 
     llm = AnthropicLLM("k", "c", http_client=httpx2.Client(transport=httpx2.MockTransport(handler)))
-    assert llm.complete("sys", "usr") == "hi"
+    done = llm.complete("sys", "usr")
+    assert done.text == "hi" and (done.prompt_tokens, done.completion_tokens) == (1, 1)
     assert seen["system"] == "sys"
 
 
@@ -145,9 +164,9 @@ class _FakeLLM:
     def __init__(self) -> None:
         self.calls = 0
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> Completion:
         self.calls += 1
-        return "  grounded answer [1]  "
+        return Completion("  grounded answer [1]  ", 11, 5)
 
 
 async def test_answer_skips_llm_without_context() -> None:
@@ -159,6 +178,7 @@ async def test_answer_skips_llm_without_context() -> None:
 async def test_answer_returns_stripped_text_and_sources() -> None:
     out = await answer_question("q", [_chunk()], _FakeLLM())
     assert out.answer == "grounded answer [1]" and len(out.sources) == 1
+    assert (out.prompt_tokens, out.completion_tokens) == (11, 5)
 
 
 async def test_answer_without_llm_but_with_context_raises_config_error() -> None:

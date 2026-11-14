@@ -1,0 +1,249 @@
+import '@testing-library/jest-dom/vitest'
+import { screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { api } from '../api/client'
+import { renderAt, resetStore, signInAs } from '../test/helpers'
+import type { DayUsage, Trace } from '../types'
+
+vi.mock('../config', () => ({ POLL_MS: 10 }))
+vi.mock('../api/client', () => ({
+  api: {
+    health: vi.fn(),
+    listDocuments: vi.fn(),
+    listTraces: vi.fn(),
+    usage: vi.fn(),
+  },
+  ApiError: class ApiError extends Error {},
+}))
+
+const m = vi.mocked(api)
+
+const trace = (over: Partial<Trace> = {}): Trace => ({
+  id: 't1',
+  created_at: '2026-11-14T10:00:00',
+  kind: 'chat',
+  status: 'ok',
+  duration_ms: 1234,
+  user_email: 'bob@example.test',
+  document_id: null,
+  model: 'some/model',
+  prompt_tokens: 120,
+  completion_tokens: 9,
+  hits: 3,
+  error: null,
+  question: null,
+  meta: { top_k: 5 },
+  ...over,
+})
+const day = (over: Partial<DayUsage> = {}): DayUsage => ({
+  day: '2026-11-14',
+  requests: 10,
+  errors: 2,
+  avg_ms: 500,
+  p95_ms: 900,
+  prompt_tokens: 1000,
+  completion_tokens: 200,
+  ...over,
+})
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  resetStore()
+  m.health.mockResolvedValue({ status: 'ok', checks: {} })
+  m.listDocuments.mockResolvedValue([])
+  m.listTraces.mockResolvedValue({ items: [], total: 0 })
+  m.usage.mockResolvedValue([])
+})
+
+describe('permission gating', () => {
+  it.each(['/traces', '/usage'])(
+    'hides the links and explains on a deep link to %s without traces:read',
+    async (path) => {
+      signInAs(['documents:read', 'chat:use', 'users:manage'])
+      renderAt(path)
+      expect(await screen.findByRole('alert')).toHaveTextContent('traces:read')
+      expect(screen.queryByRole('link', { name: 'Traces' })).not.toBeInTheDocument()
+      expect(screen.queryByRole('link', { name: 'Usage' })).not.toBeInTheDocument()
+      expect(m.listTraces).not.toHaveBeenCalled()
+      expect(m.usage).not.toHaveBeenCalled()
+    },
+  )
+  it('shows the links with the permission', async () => {
+    renderAt('/')
+    expect(await screen.findByRole('link', { name: 'Traces' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Usage' })).toBeInTheDocument()
+  })
+})
+
+describe('Traces page', () => {
+  it('shows the empty state', async () => {
+    renderAt('/traces')
+    expect(await screen.findByText(/No traces yet/)).toBeInTheDocument()
+  })
+
+  it('lists traces with status marks (icon + word, not colour alone) and tokens', async () => {
+    m.listTraces.mockResolvedValue({
+      items: [
+        trace(),
+        trace({
+          id: 't2',
+          status: 'error',
+          error: 'LLM provider returned 429',
+          prompt_tokens: null,
+          completion_tokens: null,
+          hits: null,
+        }),
+      ],
+      total: 2,
+    })
+    renderAt('/traces')
+    expect(await screen.findByText('✓ ok')).toBeInTheDocument()
+    expect(screen.getByText('✕ error')).toBeInTheDocument()
+    expect(screen.getByText('120 / 9')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThanOrEqual(2) // missing tokens + hits
+    expect(screen.getAllByText('1,234 ms')).toHaveLength(2)
+  })
+
+  it('expands a row to show the error and details', async () => {
+    m.listTraces.mockResolvedValue({
+      items: [
+        trace({ id: 't2', status: 'error', error: 'LLM provider returned 429', question: 'why?' }),
+      ],
+      total: 1,
+    })
+    renderAt('/traces')
+    await userEvent.click(await screen.findByRole('button', { name: 'details t2' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('LLM provider returned 429')
+    expect(screen.getByText('why?')).toBeInTheDocument()
+    expect(screen.getByText('{"top_k":5}')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'details t2' }))
+    expect(screen.queryByText('why?')).not.toBeInTheDocument()
+  })
+
+  it('filters by type and status and resets to the first page', async () => {
+    m.listTraces.mockResolvedValue({ items: [trace()], total: 60 })
+    renderAt('/traces')
+    await screen.findByText('✓ ok')
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() =>
+      expect(m.listTraces).toHaveBeenLastCalledWith({
+        kind: '',
+        status: '',
+        limit: 25,
+        offset: 25,
+      }),
+    )
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'ingest')
+    await waitFor(() =>
+      expect(m.listTraces).toHaveBeenLastCalledWith({
+        kind: 'ingest',
+        status: '',
+        limit: 25,
+        offset: 0,
+      }),
+    )
+    await userEvent.selectOptions(screen.getByLabelText('Status'), 'error')
+    await waitFor(() =>
+      expect(m.listTraces).toHaveBeenLastCalledWith({
+        kind: 'ingest',
+        status: 'error',
+        limit: 25,
+        offset: 0,
+      }),
+    )
+  })
+
+  it('paginates: Previous disabled on page one, Next disabled on the last page', async () => {
+    m.listTraces.mockResolvedValue({ items: [trace()], total: 30 })
+    renderAt('/traces')
+    await screen.findByText('✓ ok')
+    expect(screen.getByRole('button', { name: 'Previous' })).toBeDisabled()
+    expect(screen.getByText(/1–25 of 30/)).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Next' })).toBeDisabled())
+    expect(screen.getByText(/26–30 of 30/)).toBeInTheDocument()
+  })
+
+  it('surfaces a load error', async () => {
+    m.listTraces.mockRejectedValue(new Error('boom'))
+    renderAt('/traces')
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom')
+  })
+})
+
+describe('Usage page', () => {
+  it('computes the headline tiles from the daily data', async () => {
+    m.usage.mockResolvedValue([
+      day({
+        day: '2026-11-13',
+        requests: 10,
+        errors: 1,
+        avg_ms: 100,
+        prompt_tokens: 1000,
+        completion_tokens: 500,
+      }),
+      day({
+        day: '2026-11-14',
+        requests: 30,
+        errors: 5,
+        avg_ms: 200,
+        prompt_tokens: 2000,
+        completion_tokens: 500,
+      }),
+    ])
+    renderAt('/usage')
+    expect(await screen.findByTestId('tile-requests')).toHaveTextContent('40')
+    expect(screen.getByTestId('tile-error-rate')).toHaveTextContent('15.0%') // 6 / 40
+    expect(screen.getByTestId('tile-latency')).toHaveTextContent('175 ms') // (10*100 + 30*200) / 40
+    expect(screen.getByTestId('tile-tokens')).toHaveTextContent('4k') // 1000+500+2000+500
+  })
+
+  it('shows dashes instead of NaN when there is no traffic', async () => {
+    m.usage.mockResolvedValue([
+      day({
+        requests: 0,
+        errors: 0,
+        avg_ms: null,
+        p95_ms: null,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+      }),
+    ])
+    renderAt('/usage')
+    expect(await screen.findByTestId('tile-error-rate')).toHaveTextContent('—')
+    expect(screen.getByTestId('tile-latency')).toHaveTextContent('—')
+    expect(screen.getByTestId('tile-requests')).toHaveTextContent('0')
+  })
+
+  it('renders both charts with legends and an accessible table view', async () => {
+    m.usage.mockResolvedValue([day()])
+    renderAt('/usage')
+    await screen.findByTestId('tile-requests')
+    expect(screen.getByRole('img', { name: 'Requests per day' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'LLM tokens per day' })).toBeInTheDocument()
+    expect(screen.getAllByLabelText('legend')).toHaveLength(2)
+    const table = screen.getByRole('table', { name: 'usage by day', hidden: true })
+    expect(within(table).getByText('2026-11-14')).toBeInTheDocument()
+    expect(within(table).getByText('500 ms')).toBeInTheDocument()
+    expect(within(table).getByText('900 ms')).toBeInTheDocument()
+  })
+
+  it('re-queries when the period or type changes', async () => {
+    m.usage.mockResolvedValue([day()])
+    renderAt('/usage')
+    await screen.findByTestId('tile-requests')
+    expect(m.usage).toHaveBeenLastCalledWith(14, '')
+    await userEvent.selectOptions(screen.getByLabelText('Period'), '30')
+    await waitFor(() => expect(m.usage).toHaveBeenLastCalledWith(30, ''))
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'chat')
+    await waitFor(() => expect(m.usage).toHaveBeenLastCalledWith(30, 'chat'))
+  })
+
+  it('surfaces a load error', async () => {
+    m.usage.mockRejectedValue(new Error('usage unavailable'))
+    renderAt('/usage')
+    expect(await screen.findByRole('alert')).toHaveTextContent('usage unavailable')
+  })
+})

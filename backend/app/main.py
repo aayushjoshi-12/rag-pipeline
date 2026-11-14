@@ -10,7 +10,7 @@ from sqlalchemy import text
 from app.config import Settings
 from app.db.engine import async_session, engine
 from app.observability import configure_for_server
-from app.routers import auth, chat, documents, health
+from app.routers import auth, chat, documents, health, traces
 from app.services import observability
 from app.services.auth import accounts
 from app.services.langfuse import configure_from_settings
@@ -67,3 +67,4 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
+app.include_router(traces.router)

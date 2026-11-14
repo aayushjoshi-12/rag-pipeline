@@ -12,7 +12,8 @@ from app.config import Settings
 from app.db import ops
 from app.main import app
 from app.routers import deps
-from app.services.llm import LLMRequestError, LLMUnavailableError
+from app.services import traces
+from app.services.llm import Completion, LLMRequestError, LLMUnavailableError
 from app.services.retriever import retrieve
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -51,11 +52,11 @@ class FakeLLM:
         self.exc = exc
         self.prompts: list[str] = []
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> Completion:
         if self.exc:
             raise self.exc
         self.prompts.append(user)
-        return "The answer is 42 [1]."
+        return Completion("The answer is 42 [1].", 120, 9)
 
 
 def _hit(doc_id: uuid.UUID, index: int, text: str, score: float = 0.2) -> dict[str, Any]:
@@ -205,3 +206,64 @@ async def test_chat_retrieval_failure_is_503(chat_client: Any) -> None:
 async def test_chat_validates_input(chat_client: Any, payload: dict[str, Any]) -> None:
     c, _ = chat_client
     assert (await c.post("/chat", json=payload)).status_code == 422
+
+
+# ── trace log ────────────────────────────────────────────────────────────────
+
+
+async def _traces(session: AsyncSession, kind: str = "chat") -> list[Any]:
+    rows, _ = await traces.list_traces(session, kind=kind, limit=200)
+    return rows
+
+
+async def test_successful_chat_records_a_trace_with_tokens_model_and_hits(
+    chat_client: Any, db_session: AsyncSession
+) -> None:
+    c, state = chat_client
+    doc = await _doc(db_session, "facts.pdf")
+    state["store"] = FakeStore([_hit(doc, 1, "Life is 42."), _hit(doc, 2, "More.")])
+    before = len(await _traces(db_session))
+    assert (await c.post("/chat", json={"question": "What is life?"})).status_code == 200
+    rows = await _traces(db_session)
+    assert len(rows) == before + 1
+    t = rows[0]  # newest first
+    assert (t.kind, t.status, t.model) == ("chat", "ok", "fake")
+    assert (t.prompt_tokens, t.completion_tokens, t.hits) == (120, 9, 2)
+    assert t.error is None and t.duration_ms >= 0
+    assert t.question is None  # content capture is off by default
+    assert t.meta == {"top_k": 4, "document_filter": 0}
+    assert t.user_email is None  # auth disabled in this harness => anonymous
+
+
+async def test_trace_stores_the_question_only_when_capture_is_enabled(
+    chat_client: Any, db_session: AsyncSession
+) -> None:
+    c, _ = chat_client
+    app.dependency_overrides[deps.get_settings] = lambda: Settings(
+        default_top_k=4, auth_enabled=False, trace_capture_content=True
+    )
+    await c.post("/chat", json={"question": "secret question text"})
+    assert (await _traces(db_session))[0].question == "secret question text"
+
+
+async def test_failed_chat_records_an_error_trace_and_still_returns_the_error(
+    chat_client: Any, db_session: AsyncSession
+) -> None:
+    c, state = chat_client
+    doc = await _doc(db_session)
+    state["store"] = FakeStore([_hit(doc, 0, "text")])
+    state["llm"] = FakeLLM(LLMUnavailableError("LLM provider returned 429"))
+    r = await c.post("/chat", json={"question": "q"})
+    assert r.status_code == 503
+    t = (await _traces(db_session))[0]
+    assert t.status == "error" and "429" in (t.error or "")
+    assert t.hits == 1 and t.prompt_tokens is None
+
+
+async def test_a_request_with_no_hits_is_traced_as_ok_without_tokens(
+    chat_client: Any, db_session: AsyncSession
+) -> None:
+    c, _ = chat_client
+    await c.post("/chat", json={"question": "nothing here"})
+    t = (await _traces(db_session))[0]
+    assert (t.status, t.hits, t.prompt_tokens) == ("ok", 0, None)

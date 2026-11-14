@@ -7,6 +7,8 @@ import DocumentsPage from './pages/DocumentsPage'
 import LoginPage from './pages/LoginPage'
 import OverviewPage from './pages/OverviewPage'
 import RolesPage from './pages/RolesPage'
+import TracesPage from './pages/TracesPage'
+import UsagePage from './pages/UsagePage'
 import UsersPage from './pages/UsersPage'
 import { useAuth, useCan } from './store/auth'
 
@@ -15,6 +17,7 @@ function Shell() {
   const logout = useAuth((s) => s.logout)
   const canDocs = useCan('documents:read')
   const canChat = useCan('chat:use')
+  const canTraces = useCan('traces:read')
   const canUsers = useCan('users:manage')
   const canRoles = useCan('roles:manage')
 
@@ -27,6 +30,8 @@ function Shell() {
         </NavLink>
         {canDocs && <NavLink to="/documents">Documents</NavLink>}
         {canChat && <NavLink to="/chat">Chat</NavLink>}
+        {canTraces && <NavLink to="/traces">Traces</NavLink>}
+        {canTraces && <NavLink to="/usage">Usage</NavLink>}
         {canUsers && <NavLink to="/users">Users</NavLink>}
         {canRoles && <NavLink to="/roles">Roles</NavLink>}
         <span className="spacer" />
@@ -63,6 +68,22 @@ function Shell() {
             element={
               <RequirePermission permission="chat:use">
                 <ChatPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/traces"
+            element={
+              <RequirePermission permission="traces:read">
+                <TracesPage />
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/usage"
+            element={
+              <RequirePermission permission="traces:read">
+                <UsagePage />
               </RequirePermission>
             }
           />

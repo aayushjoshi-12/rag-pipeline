@@ -15,6 +15,7 @@ class Permission(StrEnum):
     DOCUMENTS_DELETE = "documents:delete"
     JOBS_READ = "jobs:read"
     CHAT_USE = "chat:use"
+    TRACES_READ = "traces:read"
     USERS_MANAGE = "users:manage"
     ROLES_MANAGE = "roles:manage"
 
@@ -25,6 +26,7 @@ DESCRIPTIONS: dict[Permission, str] = {
     Permission.DOCUMENTS_DELETE: "Delete documents",
     Permission.JOBS_READ: "View ingest job status",
     Permission.CHAT_USE: "Ask questions (chat)",
+    Permission.TRACES_READ: "View request traces and usage statistics",
     Permission.USERS_MANAGE: "Create, edit and deactivate users",
     Permission.ROLES_MANAGE: "Create, edit and delete roles",
 }

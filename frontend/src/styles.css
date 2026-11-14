@@ -97,3 +97,139 @@ form input:not([type]) {
   flex-direction: column;
   gap: 0.75rem;
 }
+
+/* ── charts (colours validated with the dataviz palette checks, light and dark) ── */
+.viz {
+  --viz-1: light-dark(#2a78d6, #3987e5);
+  --viz-2: light-dark(#eb6834, #d95926);
+  --viz-err: #d03b3b;
+  --viz-grid: light-dark(#e3e2de, #2e2e2c);
+  --viz-ink: light-dark(#52514e, #c3c2b7);
+  margin: 0 0 1.5rem;
+}
+.viz figcaption {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+.viz-legend {
+  display: flex;
+  gap: 1rem;
+  list-style: none;
+  margin: 0 0 0.25rem;
+  padding: 0;
+  color: var(--viz-ink);
+  font-size: 0.85rem;
+}
+.viz-swatch,
+.viz-key {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.35rem;
+  border-radius: 2px;
+}
+.viz-key {
+  width: 0.9rem;
+  height: 3px;
+  border-radius: 0;
+  vertical-align: middle;
+}
+.viz-wrap {
+  position: relative;
+}
+.viz svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.viz-grid,
+.viz-axis {
+  stroke: var(--viz-grid);
+  stroke-width: 1;
+}
+.viz-tick {
+  fill: var(--viz-ink);
+  font-size: 11px;
+}
+.viz-hit {
+  fill: transparent;
+  outline: none;
+}
+.viz-bar.is-active path,
+.viz-bar.is-active rect:not(.viz-hit) {
+  filter: brightness(1.12);
+}
+.viz-hit:focus-visible {
+  stroke: CanvasText;
+  stroke-width: 1;
+}
+.viz-tooltip {
+  position: absolute;
+  top: 0;
+  transform: translate(-50%, 0);
+  pointer-events: none;
+  padding: 0.4rem 0.6rem;
+  background: Canvas;
+  border: 1px solid var(--viz-grid);
+  border-radius: 6px;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px #0003;
+}
+.viz-tip-title {
+  color: var(--viz-ink);
+  margin-bottom: 0.15rem;
+}
+.viz-tip-row strong {
+  margin-right: 0.35rem;
+}
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.tile {
+  min-width: 9rem;
+  padding: 0.6rem 0.9rem;
+  border: 1px solid #8883;
+  border-radius: 8px;
+}
+.tile .num {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+.tile .lbl {
+  color: #888;
+  font-size: 0.8rem;
+}
+.filters {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin: 0.5rem 0 1rem;
+}
+
+.linklike {
+  background: none;
+  border: none;
+  padding: 0;
+  color: LinkText;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+}
+
+.filters label {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+}
+.badge {
+  white-space: nowrap;
+}
+.viz-empty {
+  color: var(--viz-ink);
+  padding: 1rem 0;
+  margin: 0;
+}

@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import JSON, Boolean, ForeignKey, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, ForeignKey, Index, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -144,3 +144,28 @@ class UserRole(Base):
     role_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("roles.id", ondelete="RESTRICT"), primary_key=True
     )
+
+
+class Trace(Base):
+    """One chat request or one ingest run: who, how long, which model, how many tokens, outcome."""
+
+    __tablename__ = "traces"
+    __table_args__ = (Index("ix_traces_kind_created", "kind", "created_at"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    created_at: Mapped[datetime] = mapped_column(
+        server_default=func.now(), default=_utcnow, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16))  # "chat" | "ingest"
+    status: Mapped[str] = mapped_column(String(16))  # "ok" | "error"
+    duration_ms: Mapped[int] = mapped_column()
+    user_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    document_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(nullable=True)
+    hits: Mapped[int | None] = mapped_column(nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: The question text; stored only when TRACE_CAPTURE_CONTENT is on.
+    question: Mapped[str | None] = mapped_column(Text, nullable=True)
+    meta: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)

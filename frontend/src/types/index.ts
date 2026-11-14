@@ -131,3 +131,35 @@ export interface PermissionInfo {
   name: string
   description: string
 }
+
+export interface Trace {
+  id: string
+  created_at: string
+  kind: 'chat' | 'ingest'
+  status: 'ok' | 'error'
+  duration_ms: number
+  user_email: string | null
+  document_id: string | null
+  model: string | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  hits: number | null
+  error: string | null
+  question: string | null
+  meta: Record<string, unknown>
+}
+
+export interface TracePage {
+  items: Trace[]
+  total: number
+}
+
+export interface DayUsage {
+  day: string
+  requests: number
+  errors: number
+  avg_ms: number | null
+  p95_ms: number | null
+  prompt_tokens: number
+  completion_tokens: number
+}

@@ -17,6 +17,7 @@ from app.main import app
 from app.routers import deps
 from app.services import observability
 from app.services.ingestion import ingest_document
+from app.services.llm import Completion
 from app.services.parser import ParseResult
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -118,8 +119,8 @@ async def test_context_does_not_leak_after_ingest(db_session: AsyncSession, tmp_
 class LLM:
     model = "fake"
 
-    def complete(self, system: str, user: str) -> str:
-        return "answer"
+    def complete(self, system: str, user: str) -> Completion:
+        return Completion("answer", 7, 3)
 
 
 async def test_chat_emits_spans(db_session: AsyncSession, rec: Recorder) -> None:

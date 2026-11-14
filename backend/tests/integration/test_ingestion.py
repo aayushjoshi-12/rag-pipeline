@@ -188,3 +188,37 @@ def test_task_is_registered_with_stable_name(name: str) -> None:
 
     assert getattr(ingest, name).name == "app.tasks.ingest.process_document"
     assert "app.tasks.ingest.process_document" in celery_app.tasks
+
+
+async def test_successful_ingest_records_a_trace_with_stats(
+    db_session: AsyncSession, tmp_path: Path
+) -> None:
+    from app.services import traces
+
+    doc, job = await _setup(db_session, tmp_path)
+    doc_id = doc.id
+    await ingest_document(
+        job.id, session=db_session, settings=Settings(), parse_fn=_parse_ok(),
+        embedder=FakeEmbedder(), store=FakeStore(),
+    )
+    rows, _ = await traces.list_traces(db_session, kind="ingest", limit=200)
+    mine = [t for t in rows if t.document_id == doc_id]
+    assert len(mine) == 1
+    t = mine[0]
+    assert (t.status, t.error, t.model) == ("ok", None, Settings().embedding_model)
+    assert t.meta["mode"] == "full" and t.meta["chunks_total"] > 1 and t.meta["embedded"] > 1
+    assert t.duration_ms >= 0
+
+
+async def test_failed_ingest_records_an_error_trace(db_session: AsyncSession, tmp_path: Path) -> None:
+    from app.services import traces
+
+    doc, job = await _setup(db_session, tmp_path)
+    doc_id = doc.id
+    await ingest_document(
+        job.id, session=db_session, settings=Settings(), parse_fn=_parse_boom,
+        embedder=FakeEmbedder(), store=FakeStore(),
+    )
+    rows, _ = await traces.list_traces(db_session, kind="ingest", status="error", limit=200)
+    mine = [t for t in rows if t.document_id == doc_id]
+    assert len(mine) == 1 and "parser exploded" in (mine[0].error or "")

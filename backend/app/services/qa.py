@@ -24,6 +24,8 @@ _MAX_CONTEXT_CHARS = 12_000
 class Answer:
     answer: str
     sources: list[ChunkResult]
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 def build_user_prompt(question: str, chunks: list[ChunkResult]) -> str:
@@ -45,5 +47,10 @@ async def answer_question(question: str, chunks: list[ChunkResult], llm: LLM | N
         return Answer(answer=NO_CONTEXT_ANSWER, sources=[])
     if llm is None:
         raise LLMConfigError("No LLM is configured (missing API key).")
-    text = await asyncio.to_thread(llm.complete, SYSTEM_PROMPT, build_user_prompt(question, chunks))
-    return Answer(answer=text.strip(), sources=chunks)
+    done = await asyncio.to_thread(llm.complete, SYSTEM_PROMPT, build_user_prompt(question, chunks))
+    return Answer(
+        answer=done.text.strip(),
+        sources=chunks,
+        prompt_tokens=done.prompt_tokens,
+        completion_tokens=done.completion_tokens,
+    )

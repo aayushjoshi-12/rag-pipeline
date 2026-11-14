@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import anthropic
@@ -27,10 +28,19 @@ class LLMConfigError(LLMError):
     """Provider is not configured (e.g. missing API key)."""
 
 
+@dataclass(frozen=True)
+class Completion:
+    """A model reply plus the provider's token counts (None when the provider omits them)."""
+
+    text: str
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+
+
 class LLM(Protocol):
     model: str
 
-    def complete(self, system: str, user: str) -> str: ...
+    def complete(self, system: str, user: str) -> Completion: ...
 
 
 class OpenAICompatLLM:
@@ -55,7 +65,7 @@ class OpenAICompatLLM:
             http_client=http_client,
         )
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> Completion:
         with observability.generation("llm.chat", model=self.model, input=user) as gen:
             try:
                 resp = self._client.chat.completions.create(
@@ -85,7 +95,11 @@ class OpenAICompatLLM:
                     usage.completion_tokens if usage else None,
                 ),
             )
-            return str(text)
+            return Completion(
+                str(text),
+                usage.prompt_tokens if usage else None,
+                usage.completion_tokens if usage else None,
+            )
 
 
 class AnthropicLLM:
@@ -103,7 +117,7 @@ class AnthropicLLM:
             api_key=api_key, timeout=timeout_seconds, max_retries=0, http_client=http_client
         )
 
-    def complete(self, system: str, user: str) -> str:
+    def complete(self, system: str, user: str) -> Completion:
         with observability.generation("llm.chat", model=self.model, input=user) as gen:
             try:
                 resp = self._client.messages.create(
@@ -127,7 +141,7 @@ class AnthropicLLM:
                     resp.usage.input_tokens, resp.usage.output_tokens
                 ),
             )
-            return text
+            return Completion(text, resp.usage.input_tokens, resp.usage.output_tokens)
 
 
 def get_llm(settings: Settings | None = None) -> LLM:
