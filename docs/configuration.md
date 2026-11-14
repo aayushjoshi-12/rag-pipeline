@@ -306,3 +306,18 @@ Set `PARSE_NORMALIZE_TEXT=false` to keep the text exactly as extracted (index-ti
 - Each call is traced as kind `search` (`meta`: `mode`, `fusion` (hybrid), `top_k`, `neighbors`, `document_filter`,
   `include_text`; the query only when `TRACE_CAPTURE_CONTENT=true`) and shows in Traces and Usage under type
   "Search".
+<!-- ticket 32: LLM cost and the Usage page -->
+## LLM cost and the Usage page
+
+Each chat trace stores `cost_usd` (USD). **Unknown is `NULL`, never 0**: the dashboard shows "—" for it.
+
+| Key | Values | Default | Scope | Meaning |
+|---|---|---|---|---|
+| `LLM_PRICE_INPUT_PER_MTOK` | float `>= 0` | unset | deployment | USD per million prompt tokens. Used for providers that do not report a cost themselves (`openai`, `anthropic`). Must be set together with the output price; unset = cost unknown. |
+| `LLM_PRICE_OUTPUT_PER_MTOK` | float `>= 0` | unset | deployment | USD per million completion tokens (see above). |
+
+- `LLM_PROVIDER=openrouter` needs no price settings: requests carry `usage: {include: true}` and OpenRouter returns the real cost in `usage.cost` (0 for `:free` models). The flag is sent only to OpenRouter.
+- A provider-reported cost always wins over the configured prices.
+- `GET /usage/credits` (needs `traces:read`) reads the OpenRouter key balance (`GET /key`) server-side, caches it 60 s, and returns `available: false` with a reason for other providers, a missing key or an unreachable endpoint. The API key is never returned.
+- `GET /usage/insights?days=&kind=` returns the aggregates behind the Usage tabs (cost by model, latency histogram, error reasons, weekday/hour heatmap, no-hit rate, hits per query, most-cited documents, chunk reuse, ingest duration by mode). Chat traces store the ids (never the text) of the documents an answer was grounded on in `meta.cited_document_ids`.
+<!-- end ticket 32 -->

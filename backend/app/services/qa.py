@@ -26,6 +26,7 @@ class Answer:
     sources: list[ChunkResult]
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    cost_usd: float | None = None
 
 
 def build_user_prompt(question: str, chunks: list[ChunkResult]) -> str:
@@ -53,4 +54,5 @@ async def answer_question(question: str, chunks: list[ChunkResult], llm: LLM | N
         sources=chunks,
         prompt_tokens=done.prompt_tokens,
         completion_tokens=done.completion_tokens,
+        cost_usd=done.cost_usd,
     )

@@ -6,10 +6,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.routers.auth_deps import require
-from app.routers.deps import get_session
-from app.schema.traces import DayUsageOut, TraceOut, TracePage
-from app.services import traces
+from app.routers.deps import get_session, get_settings
+from app.schema.traces import CreditsOut, DayUsageOut, InsightsOut, TraceOut, TracePage
+from app.services import credits, traces, usage_insights
 from app.services.auth.permissions import Permission
 
 router = APIRouter(dependencies=[Depends(require(Permission.TRACES_READ))])
@@ -51,3 +52,19 @@ async def get_usage(
 ) -> list[DayUsageOut]:
     _check(kind, traces.KINDS, "kind")
     return [DayUsageOut.model_validate(d, from_attributes=True) for d in await traces.usage(session, days=days, kind=kind)]
+
+
+@router.get("/usage/insights", response_model=InsightsOut)
+async def get_insights(
+    session: Session,
+    days: Annotated[int, Query(ge=1, le=90)] = 14,
+    kind: str | None = None,
+) -> InsightsOut:
+    _check(kind, traces.KINDS, "kind")
+    return InsightsOut.model_validate(await usage_insights.insights(session, days=days, kind=kind))
+
+
+@router.get("/usage/credits", response_model=CreditsOut)
+async def get_credits(cfg: Annotated[Settings, Depends(get_settings)]) -> CreditsOut:
+    """The OpenRouter key balance (read server-side; the key is never returned)."""
+    return CreditsOut.model_validate(await credits.get_credits(cfg))

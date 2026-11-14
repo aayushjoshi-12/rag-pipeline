@@ -35,6 +35,37 @@ class Completion:
     text: str
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
+    #: What the call cost in USD. ``None`` = unknown (never 0): the provider did not report a
+    #: cost and no price per token is configured. A free model that reports 0 gives ``0.0``.
+    cost_usd: float | None = None
+
+
+def parse_reported_cost(usage: Any) -> float | None:
+    """The provider-reported cost (OpenRouter ``usage.cost``, USD), or ``None`` if absent/invalid."""
+    if usage is None:
+        return None
+    raw = getattr(usage, "cost", None)
+    if raw is None:
+        extra = getattr(usage, "model_extra", None)
+        raw = extra.get("cost") if isinstance(extra, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, int | float):
+        return None
+    value = float(raw)
+    return value if value >= 0 and value == value and value != float("inf") else None
+
+
+def price_tokens(
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    input_per_mtok: float | None,
+    output_per_mtok: float | None,
+) -> float | None:
+    """Cost from configured per-million-token prices; ``None`` unless both prices and counts are known."""
+    if None in (prompt_tokens, completion_tokens, input_per_mtok, output_per_mtok):
+        return None
+    assert prompt_tokens is not None and completion_tokens is not None  # narrowed for mypy
+    assert input_per_mtok is not None and output_per_mtok is not None
+    return (prompt_tokens * input_per_mtok + completion_tokens * output_per_mtok) / 1_000_000
 
 
 class LLM(Protocol):
@@ -54,9 +85,16 @@ class OpenAICompatLLM:
         timeout_seconds: float = 60.0,
         max_tokens: int = 1024,
         http_client: Any | None = None,
+        report_cost: bool = False,
+        price_input_per_mtok: float | None = None,
+        price_output_per_mtok: float | None = None,
     ) -> None:
         self.model = model
         self.max_tokens = max_tokens
+        #: Ask the provider for the request cost (OpenRouter only: ``usage: {include: true}``).
+        self.report_cost = report_cost
+        self.price_input_per_mtok = price_input_per_mtok
+        self.price_output_per_mtok = price_output_per_mtok
         self._client = openai.OpenAI(
             api_key=api_key,
             base_url=base_url,
@@ -75,6 +113,7 @@ class OpenAICompatLLM:
                         {"role": "user", "content": user},
                     ],
                     max_completion_tokens=self.max_tokens,
+                    extra_body={"usage": {"include": True}} if self.report_cost else None,
                 )
             except (openai.APITimeoutError, openai.APIConnectionError) as exc:
                 raise LLMUnavailableError(f"LLM request failed: {exc}") from exc
@@ -95,11 +134,14 @@ class OpenAICompatLLM:
                     usage.completion_tokens if usage else None,
                 ),
             )
-            return Completion(
-                str(text),
-                usage.prompt_tokens if usage else None,
-                usage.completion_tokens if usage else None,
-            )
+            prompt = usage.prompt_tokens if usage else None
+            completion = usage.completion_tokens if usage else None
+            cost = parse_reported_cost(usage) if self.report_cost else None
+            if cost is None:
+                cost = price_tokens(
+                    prompt, completion, self.price_input_per_mtok, self.price_output_per_mtok
+                )
+            return Completion(str(text), prompt, completion, cost)
 
 
 class AnthropicLLM:
@@ -110,9 +152,13 @@ class AnthropicLLM:
         timeout_seconds: float = 60.0,
         max_tokens: int = 1024,
         http_client: Any | None = None,
+        price_input_per_mtok: float | None = None,
+        price_output_per_mtok: float | None = None,
     ) -> None:
         self.model = model
         self.max_tokens = max_tokens
+        self.price_input_per_mtok = price_input_per_mtok
+        self.price_output_per_mtok = price_output_per_mtok
         self._client = anthropic.Anthropic(
             api_key=api_key, timeout=timeout_seconds, max_retries=0, http_client=http_client
         )
@@ -141,7 +187,13 @@ class AnthropicLLM:
                     resp.usage.input_tokens, resp.usage.output_tokens
                 ),
             )
-            return Completion(text, resp.usage.input_tokens, resp.usage.output_tokens)
+            cost = price_tokens(
+                resp.usage.input_tokens,
+                resp.usage.output_tokens,
+                self.price_input_per_mtok,
+                self.price_output_per_mtok,
+            )
+            return Completion(text, resp.usage.input_tokens, resp.usage.output_tokens, cost)
 
 
 def get_llm(settings: Settings | None = None) -> LLM:
@@ -151,13 +203,30 @@ def get_llm(settings: Settings | None = None) -> LLM:
     if provider == "openrouter":
         if not cfg.openrouter_api_key:
             raise LLMConfigError("OPENROUTER_API_KEY is required for llm_provider='openrouter'.")
-        return OpenAICompatLLM(cfg.openrouter_api_key, model, base_url=cfg.openrouter_base_url)
+        return OpenAICompatLLM(
+            cfg.openrouter_api_key,
+            model,
+            base_url=cfg.openrouter_base_url,
+            report_cost=True,
+            price_input_per_mtok=cfg.llm_price_input_per_mtok,
+            price_output_per_mtok=cfg.llm_price_output_per_mtok,
+        )
     if provider == "openai":
         if not cfg.openai_api_key:
             raise LLMConfigError("OPENAI_API_KEY is required for llm_provider='openai'.")
-        return OpenAICompatLLM(cfg.openai_api_key, model)
+        return OpenAICompatLLM(
+            cfg.openai_api_key,
+            model,
+            price_input_per_mtok=cfg.llm_price_input_per_mtok,
+            price_output_per_mtok=cfg.llm_price_output_per_mtok,
+        )
     if provider == "anthropic":
         if not cfg.anthropic_api_key:
             raise LLMConfigError("ANTHROPIC_API_KEY is required for llm_provider='anthropic'.")
-        return AnthropicLLM(cfg.anthropic_api_key, model)
+        return AnthropicLLM(
+            cfg.anthropic_api_key,
+            model,
+            price_input_per_mtok=cfg.llm_price_input_per_mtok,
+            price_output_per_mtok=cfg.llm_price_output_per_mtok,
+        )
     raise LLMConfigError(f"Unknown LLM provider '{provider}'.")

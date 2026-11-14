@@ -56,7 +56,7 @@ class FakeLLM:
         if self.exc:
             raise self.exc
         self.prompts.append(user)
-        return Completion("The answer is 42 [1].", 120, 9)
+        return Completion("The answer is 42 [1].", 120, 9, 0.0123)
 
 
 def _hit(doc_id: uuid.UUID, index: int, text: str, score: float = 0.2) -> dict[str, Any]:
@@ -237,7 +237,15 @@ async def test_successful_chat_records_a_trace_with_tokens_model_and_hits(
     assert (t.prompt_tokens, t.completion_tokens, t.hits) == (120, 9, 2)
     assert t.error is None and t.duration_ms >= 0
     assert t.question is None  # content capture is off by default
-    assert t.meta == {"top_k": 4, "neighbors": 1, "document_filter": 0, "mode": "semantic"}
+    assert t.cost_usd == pytest.approx(0.0123)
+    # ids only (no text) of the documents the answer was grounded on, de-duplicated
+    assert t.meta == {
+        "top_k": 4,
+        "neighbors": 1,
+        "document_filter": 0,
+        "cited_document_ids": [str(doc)],
+        "mode": "semantic",
+    }
     assert t.user_email is None  # auth disabled in this harness => anonymous
 
 
@@ -263,7 +271,7 @@ async def test_failed_chat_records_an_error_trace_and_still_returns_the_error(
     assert r.status_code == 503
     t = (await _traces(db_session))[0]
     assert t.status == "error" and "429" in (t.error or "")
-    assert t.hits == 1 and t.prompt_tokens is None
+    assert t.hits == 1 and t.prompt_tokens is None and t.cost_usd is None
 
 
 async def test_a_request_with_no_hits_is_traced_as_ok_without_tokens(
@@ -273,6 +281,7 @@ async def test_a_request_with_no_hits_is_traced_as_ok_without_tokens(
     await c.post("/chat", json={"question": "nothing here"})
     t = (await _traces(db_session))[0]
     assert (t.status, t.hits, t.prompt_tokens) == ("ok", 0, None)
+    assert t.cost_usd is None and t.meta["cited_document_ids"] == []  # unknown, never 0
 
 
 async def _chunks(session: AsyncSession, doc: uuid.UUID, n: int) -> None:

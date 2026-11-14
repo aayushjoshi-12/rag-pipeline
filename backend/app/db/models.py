@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -188,6 +189,8 @@ class Trace(Base):
     prompt_tokens: Mapped[int | None] = mapped_column(nullable=True)
     completion_tokens: Mapped[int | None] = mapped_column(nullable=True)
     hits: Mapped[int | None] = mapped_column(nullable=True)
+    #: LLM cost in USD; NULL = unknown (not 0): see ``Completion.cost_usd``.
+    cost_usd: Mapped[float | None] = mapped_column(Numeric(14, 8, asdecimal=False), nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: The question text; stored only when TRACE_CAPTURE_CONTENT is on.
     question: Mapped[str | None] = mapped_column(Text, nullable=True)

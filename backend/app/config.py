@@ -264,6 +264,11 @@ class Settings(BaseSettings):
     # ── Chat/QA synthesis (OpenRouter default) ───────────────────────────────
     llm_provider: str = "openrouter"
     default_llm_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    # ── LLM cost (ticket 32) ─────────────────────────────────────────────────
+    #: USD per million tokens, used when the provider does not report a cost itself (OpenAI,
+    #: Anthropic; OpenRouter reports it). Both must be set to price a call; unset = cost unknown.
+    llm_price_input_per_mtok: float | None = None
+    llm_price_output_per_mtok: float | None = None
 
     # ── LLM provider keys (secrets) ──────────────────────────────────────────
     openrouter_api_key: str = ""
@@ -357,6 +362,14 @@ class Settings(BaseSettings):
             raise SettingsError(f"retrieval_neighbors must be within 0..{MAX_NEIGHBORS}.")
         self._validate_retrieval()
         self._validate_storage()
+        for name in ("llm_price_input_per_mtok", "llm_price_output_per_mtok"):
+            price = getattr(self, name)
+            if price is not None and price < 0:
+                raise SettingsError(f"{name} must be >= 0 (or unset).")
+        if (self.llm_price_input_per_mtok is None) != (self.llm_price_output_per_mtok is None):
+            raise SettingsError(
+                "Set both llm_price_input_per_mtok and llm_price_output_per_mtok, or neither."
+            )
         if self.trace_retention_days < 1:
             raise SettingsError("trace_retention_days must be >= 1.")
         if self.cleanup_orphan_age_hours < 0:

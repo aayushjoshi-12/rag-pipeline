@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Trace
@@ -31,6 +31,7 @@ async def record(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     hits: int | None = None,
+    cost_usd: float | None = None,
     error: str | None = None,
     question: str | None = None,
     meta: dict[str, Any] | None = None,
@@ -48,6 +49,7 @@ async def record(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 hits=hits,
+                cost_usd=cost_usd,
                 error=(error or None) and error[:2000],
                 question=question,
                 meta=meta or {},
@@ -92,6 +94,10 @@ class DayUsage:
     p95_ms: float | None = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
+    #: Sum of the known costs of the day; ``None`` when no request that day had a known cost.
+    cost_usd: float | None = None
+    #: Successful chat requests whose cost is unknown (so ``cost_usd`` is a lower bound).
+    unpriced_requests: int = 0
 
 
 async def usage(session: AsyncSession, *, days: int, kind: str | None = None) -> list[DayUsage]:
@@ -108,6 +114,10 @@ async def usage(session: AsyncSession, *, days: int, kind: str | None = None) ->
             func.percentile_cont(0.95).within_group(Trace.duration_ms).label("p95_ms"),
             func.coalesce(func.sum(Trace.prompt_tokens), 0).label("prompt_tokens"),
             func.coalesce(func.sum(Trace.completion_tokens), 0).label("completion_tokens"),
+            func.sum(Trace.cost_usd).label("cost_usd"),
+            func.count()
+            .filter(and_(Trace.kind == "chat", Trace.status == "ok", Trace.cost_usd.is_(None)))
+            .label("unpriced"),
         )
         .where(Trace.created_at >= datetime.combine(since, datetime.min.time()))
         .group_by(day)
@@ -123,6 +133,8 @@ async def usage(session: AsyncSession, *, days: int, kind: str | None = None) ->
             float(r.p95_ms) if r.p95_ms is not None else None,
             int(r.prompt_tokens),
             int(r.completion_tokens),
+            float(r.cost_usd) if r.cost_usd is not None else None,
+            int(r.unpriced),
         )
         for r in (await session.execute(stmt)).all()
     }

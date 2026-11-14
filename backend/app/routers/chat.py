@@ -46,7 +46,7 @@ async def chat(
     neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
     options = RetrievalOptions.from_settings(cfg, mode=req.mode, fusion=req.fusion)
     started = time.perf_counter()
-    outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None, "prompt": None, "completion": None}
+    outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None, "prompt": None, "completion": None, "cost": None, "cited": []}
     try:
         return await _chat(req, top_k, neighbors, options, session, cfg, embedder, store, llm, outcome)
     except HTTPException as exc:
@@ -66,12 +66,15 @@ async def chat(
             prompt_tokens=outcome["prompt"],
             completion_tokens=outcome["completion"],
             hits=outcome["hits"],
+            cost_usd=outcome["cost"],
             error=outcome["error"],
             question=req.question if cfg.trace_capture_content else None,
             meta={
                 "top_k": top_k,
                 "neighbors": neighbors,
                 "document_filter": len(req.document_ids or []),
+                # ids only (never content): which documents the answer was grounded on
+                "cited_document_ids": outcome["cited"],
                 **options.trace_meta(),
             },
         )
@@ -123,7 +126,13 @@ async def _chat(
             logger.warning("llm_rejected", error=str(exc))
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
-        outcome.update(status="ok", prompt=result.prompt_tokens, completion=result.completion_tokens)
+        outcome.update(
+            status="ok",
+            prompt=result.prompt_tokens,
+            completion=result.completion_tokens,
+            cost=result.cost_usd,
+            cited=list(dict.fromkeys(str(c.document_id) for c in result.sources if c.is_hit)),
+        )
         root.update(output=observability.maybe_content(result.answer), metadata={"sources": len(result.sources)})
         logger.info("chat_answered", sources=len(result.sources))
         return ChatResponse(

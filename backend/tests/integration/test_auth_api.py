@@ -38,6 +38,8 @@ GUARDED: list[tuple[str, str, Permission]] = [
     ("GET", "/traces", Permission.TRACES_READ),
     ("GET", f"/traces/{FAKE_ID}", Permission.TRACES_READ),
     ("GET", "/usage", Permission.TRACES_READ),
+    ("GET", "/usage/insights", Permission.TRACES_READ),
+    ("GET", "/usage/credits", Permission.TRACES_READ),
     ("GET", "/users", Permission.USERS_MANAGE),
     ("POST", "/users", Permission.USERS_MANAGE),
     ("PATCH", f"/users/{FAKE_ID}", Permission.USERS_MANAGE),
