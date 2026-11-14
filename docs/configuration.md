@@ -39,6 +39,19 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
 | `IVFFLAT_PROBES` | integer `1..IVFFLAT_LISTS` | `10` | query-time | Clusters searched per query (latency vs recall). `= IVFFLAT_LISTS` is an exact search. |
 | `EMBEDDING_DIMENSION` | integer | unset = known model table, else one probe call | reindex | Vector length for the pgvector column (never hard-coded). Known: mxbai-embed-large 1024, nomic-embed-text 768, text-embedding-3-small 1536, ... Set it for any other model so no embedding call is needed at startup. |
 | `CHROMA_COLLECTION` | string | `documents` | deployment | Collection holding the vectors, so several deployments can share one Chroma server. |
+| `STORAGE_BACKEND` | `local`, `s3` | `local` | deployment (per document: `documents.storage_backend`) | Where uploaded / downloaded source files are kept. `local` = `DATA_DIR/uploads/<id>/<name>`. `s3` = any S3-compatible store through boto3. Existing documents stay where they were written. See [File storage and URL ingest](#file-storage-and-url-ingest). |
+| `S3_ENDPOINT_URL` | http(s) URL or empty | empty (= AWS) | deployment | Endpoint of an S3-compatible store (MinIO: `http://minio:9000`). Path-style addressing is used when set. |
+| `S3_BUCKET` | string | empty | deployment | Bucket for `STORAGE_BACKEND=s3` (required then) and the default bucket `s3://` links may read. |
+| `S3_REGION` | string | `us-east-1` | deployment | Signing region. |
+| `S3_PREFIX` | key prefix | `rag-pipeline/` | deployment | Everything the app writes lives under `<prefix>uploads/<32 hex>/<name>`; it never lists, reads (storage) or deletes anything outside it. |
+| `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | strings (**secrets**) | empty (= boto3 default chain / IAM role) | deployment | Must be set together. `.env` / K8s Secret only, never in `config.<env>.json`. |
+| `URL_INGEST_SCHEMES` | comma list of `http`, `https`, `s3` | `http,https,s3` | deployment | Schemes `POST /documents/from-url` (and every redirect hop) may use. |
+| `URL_INGEST_S3_BUCKETS` | comma list of bucket names | empty (= only `S3_BUCKET`) | deployment | Buckets an `s3://` link may read. The server's credentials are used, so keep this list tight. |
+| `URL_INGEST_ALLOW_PRIVATE` | `true`, `false` | `false` | deployment | **Tests / smoke runs only.** `true` disables the private/loopback/link-local/metadata address block so a local test server can be reached. Never set it in production. |
+| `URL_INGEST_TIMEOUT_SECONDS` | `0 < v <= 600` | `20` | deployment | Connect / read timeout of each download request. |
+| `URL_INGEST_TOTAL_TIMEOUT_SECONDS` | `>= URL_INGEST_TIMEOUT_SECONDS`, `<= 3600` | `120` | deployment | Overall deadline of one download (defeats slow-drip servers). |
+| `URL_INGEST_MAX_REDIRECTS` | integer `0..20` | `5` | deployment | Redirect hops followed (each one is re-validated). |
+| `URL_INGEST_MAX_BYTES` | integer `>= 1` or unset | unset = `MAX_UPLOAD_SIZE_BYTES` | deployment | Download size cap, enforced on the bytes actually received. |
 
 Why these defaults: see "Parameter choice" in `docs/adr/0003-chunking.md`.
 
@@ -182,3 +195,74 @@ by SQL over the whole corpus (not over the `document_ids` filter, so a chunk's s
 rank highly but `ts_rank_cd` ranks below the cut is never seen (tested). idf, length normalisation and tf are exact. Other limits: stopwords are not
 counted in lengths; Postgres stores at most 256 positions per lexeme (tf saturates there); at most 64 query terms are used (the rarest ones) and at most the
 first 2,000 characters of the question; dropped terms with no match in the corpus cost nothing.
+
+## File storage and URL ingest
+
+### Storage backends
+
+Source files are addressed by a key `uploads/<32 hex>/<file name>` stored in `documents.source_path`;
+`documents.storage_backend` (`local` | `s3`) says which backend holds it, so switching `STORAGE_BACKEND` never strands
+existing documents (they keep being read, replaced and deleted where they are). The parser still needs a local
+file: for S3 the object is downloaded to a temp file for the duration of the parse.
+
+* **Delete** (`DELETE /documents/{id}`) removes the stored file/object (best effort: a storage failure is logged and
+  the scheduled cleanup removes the leftover). **Replace** (`PUT /documents/{id}`) stores the new file in the
+  *configured* backend and removes the old version from the backend it was in.
+* **Orphan cleanup** (daily Celery task, `CLEANUP_ORPHAN_AGE_HOURS`): local = `uploads/<id>` directories no document
+  references. S3 (only when `STORAGE_BACKEND=s3`) = objects that are under `S3_PREFIX`, have exactly the shape
+  `uploads/<32 hex>/<name>`, are referenced by no `s3` document and are older than the age limit. Anything else in
+  the bucket (other prefixes, other key shapes, other tenants) is never listed for deletion.
+* **Local MinIO**: `docker compose --profile s3 up -d minio` starts a real MinIO on `:9000` (console `:9001`) with
+  bucket `$S3_BUCKET` (default `rag-documents`). The default `docker compose up` does not start it. MinIO no longer
+  publishes images to Docker Hub/Quay, so the profile uses the last public Bitnami build (`MINIO_IMAGE` overrides it).
+  Containers must reach it as `http://minio:9000`: set `S3_ENDPOINT_URL_DOCKER=http://minio:9000` (and
+  `S3_ENDPOINT_URL=http://localhost:9000` for host-run tools/tests).
+* **Kubernetes**: with `STORAGE_BACKEND=s3` the api and worker no longer share a ReadWriteMany uploads volume.
+
+### Ingest from a link: `POST /documents/from-url`
+
+```bash
+curl -X POST http://localhost:8000/documents/from-url -H "Authorization: Bearer $TOKEN" \
+     -H 'Content-Type: application/json' -d '{"url": "https://www.rfc-editor.org/rfc/rfc8259.txt"}'
+# 201 {"document": {"id": "...", "filename": "rfc8259.txt", "source_url": "https://www.rfc-editor.org/rfc/rfc8259.txt", "status": "pending", ...},
+#       "job": {"id": "...", "status": "pending", ...}}
+curl http://localhost:8000/jobs/<job id> -H "Authorization: Bearer $TOKEN"
+# stats: {"source_url": "...", "bytes_downloaded": 71, "storage": "local", "mode": "full", "chunks_total": ..., ...}
+```
+
+Permission `documents:write`. The same API serves the dashboard and any other client; the OpenAPI document (`/docs`)
+describes the body, the `201` and the errors.
+
+| Status | When |
+|---|---|
+| `201` | Link accepted; job queued. The document's `filename` is provisional until the download finished. |
+| `400` | Link refused: scheme not allowed, credentials in the URL, private/internal address, host does not resolve, bucket not allowed, S3 not configured, malformed. `detail` explains. |
+| `401` / `403` | Not signed in / missing `documents:write`. |
+| `422` | Body is not `{"url": "<string up to 2048 chars>"}`. |
+| `503` | Broker unavailable; nothing was queued. |
+
+Errors are `{"detail": "<message>"}` like every other endpoint. Failures **after** the `201` (download refused or
+failed, wrong file type, too large) appear on the job: `status: "failed"`, `error: "..."`.
+
+* **The download runs in the worker.** The API only validates the link and records the job. The full URL is passed to
+  the worker in the broker message only; the database, API responses, logs and traces hold the URL with credentials
+  and query string removed (a presigned URL's signature is in its query).
+* **Submitting the same link twice creates two documents** (no de-duplication by URL; delete one if unwanted).
+* **SSRF protection** (`app/services/urlguard.py`): scheme allow-list; no `user:pass@`; the host is parsed by the app
+  itself (decimal / hex / octal / short IPv4, IPv6, IPv4-mapped, NAT64, 6to4, IDNA) and a hostname is resolved by the
+  app: **every** returned address must be public (a name with one public and one private record is refused). The
+  blocked ranges are loopback, RFC 1918, link-local (incl. `169.254.169.254`), CGNAT `100.64/10`, `0/8`, multicast,
+  reserved, benchmarking/documentation ranges, IPv6 loopback/ULA/link-local/site-local/multicast/Teredo, and the Azure
+  wireserver; names `localhost`, `*.localhost`, `*.local`, `*.internal`, `metadata*` are refused up front. The connection
+  is made to the **validated IP** (Host header and TLS SNI/certificate check keep the hostname), which defeats DNS
+  rebinding. Redirects are followed by the app (max `URL_INGEST_MAX_REDIRECTS`) and **each hop** goes through the same
+  checks, including a redirect to `s3://` or `file://`. Proxy environment variables are ignored.
+* **Download limits**: the cap is applied to the bytes received (decoded), not to `Content-Length`; connect/read
+  timeouts plus an overall deadline.
+* **File type**: the extension (from `Content-Disposition`, else the final URL's path) must be `pdf`/`docx`/`txt`/`md`;
+  when the name has none, the content type decides (`application/pdf`, `text/plain`, `text/markdown`, DOCX). HTML
+  responses are refused; PDF needs a `%PDF-` header, DOCX a zip header, text must not contain NUL bytes. The file name is
+  sanitised (no directories, traversal, odd characters).
+* **`s3://bucket/key`**: read with the server's S3 credentials/endpoint, only from `URL_INGEST_S3_BUCKETS` (default
+  `S3_BUCKET`), size-capped like an HTTP download, and **copied** into the configured storage so the document owns its
+  copy (deleting the document never touches the source object).

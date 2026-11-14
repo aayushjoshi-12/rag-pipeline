@@ -4,6 +4,9 @@ import type { Job } from '../types'
 import { StatusBadge } from './StatusBadge'
 import { Alert } from './ui'
 
+const formatBytes = (n: number): string =>
+  n >= 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
+
 const STEPS = ['pending', 'running', 'done'] as const
 
 /** Live status of one ingest job, polled until it settles. */
@@ -36,6 +39,13 @@ export function JobTracker({
         max={100}
         aria-label={`progress ${filename}`}
       />
+      {job?.stats?.source_url && status !== 'pending' && (
+        <p className="stats muted small" data-testid="job-source">
+          From <span className="truncate">{job.stats.source_url}</span>
+          {job.stats.bytes_downloaded !== undefined &&
+            ` · ${formatBytes(job.stats.bytes_downloaded)} downloaded`}
+        </p>
+      )}
       {job?.stats && status === 'done' && (
         <p className="stats muted small" data-testid="job-stats">
           {job.stats.mode === 'incremental'

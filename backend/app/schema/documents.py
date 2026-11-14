@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.db.enums import DocumentStatus, JobStatus
 
@@ -31,12 +31,32 @@ class DocumentOut(_ORM):
     filename: str
     content_type: str
     status: DocumentStatus
+    source_url: str | None = Field(
+        default=None,
+        description="Link the document was ingested from, with credentials and query string removed. null for uploads.",
+        examples=["https://www.rfc-editor.org/rfc/rfc8259.txt"],
+    )
+    storage_backend: str = Field(default="local", description="Where the source file is stored: local | s3.")
     created_at: datetime
     updated_at: datetime
 
 
 class DocumentDetail(DocumentOut):
     jobs: list[JobOut]
+
+
+class FromUrlRequest(BaseModel):
+    url: str = Field(
+        min_length=1,
+        max_length=2048,
+        description=(
+            "http(s):// link to a .pdf/.docx/.txt/.md file, or s3://<bucket>/<key> (bucket must be "
+            "allowed by URL_INGEST_S3_BUCKETS). No embedded credentials. Private/loopback/link-local/"
+            "metadata addresses are refused. Submitting a link that was ingested before creates a NEW "
+            "document (no de-duplication by URL)."
+        ),
+        examples=["https://www.rfc-editor.org/rfc/rfc8259.txt", "s3://my-bucket/reports/q3.pdf"],
+    )
 
 
 class UploadResponse(BaseModel):

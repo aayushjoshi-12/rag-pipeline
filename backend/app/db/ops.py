@@ -33,6 +33,8 @@ async def create_document(
     content_type: str,
     source_path: str | None = None,
     status: DocumentStatus = DocumentStatus.PENDING,
+    storage_backend: str = "local",
+    source_url: str | None = None,
     session: AsyncSession | None = None,
 ) -> Document:
     async with AsyncExitStack() as stack:
@@ -42,6 +44,8 @@ async def create_document(
             content_type=content_type,
             source_path=source_path,
             status=status,
+            storage_backend=storage_backend,
+            source_url=source_url,
         )
         sess.add(doc)
         await sess.commit()
@@ -91,6 +95,7 @@ async def replace_document_source(
     filename: str,
     content_type: str,
     source_path: str,
+    storage_backend: str = "local",
     session: AsyncSession | None = None,
 ) -> Document | None:
     """Point a document at a new source file and mark it pending for re-ingest."""
@@ -101,6 +106,29 @@ async def replace_document_source(
             return None
         doc.filename, doc.content_type = filename, content_type
         doc.source_path, doc.status = source_path, DocumentStatus.PENDING
+        doc.storage_backend, doc.source_url = storage_backend, None
+        await sess.commit()
+        await sess.refresh(doc)
+        return doc
+
+
+async def set_document_source(
+    document_id: uuid.UUID,
+    *,
+    filename: str,
+    content_type: str,
+    source_path: str,
+    storage_backend: str,
+    session: AsyncSession | None = None,
+) -> Document | None:
+    """Record the file a URL ingest downloaded (keeps ``source_url``; status is left to the ingest)."""
+    async with AsyncExitStack() as stack:
+        sess = await _acquire(session, stack)
+        doc = await sess.get(Document, document_id)
+        if doc is None:
+            return None
+        doc.filename, doc.content_type = filename, content_type
+        doc.source_path, doc.storage_backend = source_path, storage_backend
         await sess.commit()
         await sess.refresh(doc)
         return doc

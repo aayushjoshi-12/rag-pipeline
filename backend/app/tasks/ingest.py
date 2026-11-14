@@ -20,7 +20,7 @@ from app.services.parser import parse
 from app.services.vectorstore import get_vector_store
 
 
-async def _run(job_id: str) -> str:
+async def _run(job_id: str, url: str | None = None) -> str:
     settings = Settings()
     configure_for_server(level=logging.getLevelName(settings.log_level))
     configure_from_settings(settings)
@@ -47,6 +47,7 @@ async def _run(job_id: str) -> str:
                 parse_fn=lambda path, filetype, cfg: parse(path, filetype, settings=cfg),
                 embedder=embedder,
                 store=store,
+                fetch_url=url,
             )
             return str(status.value)
     finally:
@@ -55,11 +56,12 @@ async def _run(job_id: str) -> str:
 
 
 @celery_app.task(name="app.tasks.ingest.process_document")  # type: ignore[untyped-decorator]
-def process_document(job_id: str) -> str:
+def process_document(job_id: str, url: str | None = None) -> str:
     """Process a doc job: parse → chunk → embed → store. Returns the final job status.
 
     Failures are recorded on the job row (status ``failed`` + error); the task itself does
     not raise, so a bad document never poisons the worker or triggers broker redelivery loops.
-    Re-running an already-processed job restarts the ingest cleanly.
+    Re-running an already-processed job restarts the ingest cleanly. ``url`` is only passed for
+    link ingests that still have to be downloaded (see ``POST /documents/from-url``).
     """
-    return asyncio.run(_run(job_id))
+    return asyncio.run(_run(job_id, url))

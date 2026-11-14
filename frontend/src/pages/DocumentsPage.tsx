@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Icon } from '../components/Icon'
+import { LinkForm } from '../components/LinkForm'
 import { StatusBadge } from '../components/StatusBadge'
 import { UploadForm } from '../components/UploadForm'
 import { Alert, Card, EmptyState, PageHeader, SkeletonRows } from '../components/ui'
@@ -32,6 +33,7 @@ export default function DocumentsPage() {
         }
       />
       {canWrite && <UploadForm />}
+      {canWrite && <LinkForm />}
       {error && <Alert>{error}</Alert>}
       <Card title="Library" description={`${documents.length} in total`} flush>
         {loading && documents.length === 0 ? (
@@ -39,7 +41,7 @@ export default function DocumentsPage() {
         ) : documents.length === 0 ? (
           <EmptyState icon="documents" title="No documents yet">
             {canWrite
-              ? 'Drop a file in the upload area above to index your first document.'
+              ? 'Drop a file in the upload area above, or add a link, to index your first document.'
               : 'Documents will appear here once someone uploads them.'}
           </EmptyState>
         ) : (

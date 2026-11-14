@@ -3,9 +3,10 @@ Celery task — it never parses, chunks or embeds (ingest runs in the worker).""
 
 from __future__ import annotations
 
+import asyncio
 import logging
-import re
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Annotated
@@ -17,26 +18,38 @@ from app.config import Settings
 from app.db import ops
 from app.db.enums import DocumentStatus, JobStatus
 from app.routers.auth_deps import require
-from app.routers.deps import Enqueue, get_enqueue, get_session, get_settings, get_store
+from app.routers.deps import (
+    Enqueue,
+    EnqueueUrl,
+    get_enqueue,
+    get_enqueue_url,
+    get_session,
+    get_settings,
+    get_store,
+)
 from app.schema.documents import (
     ChunkOut,
     DocumentDetail,
     DocumentOut,
+    FromUrlRequest,
     JobOut,
     UploadResponse,
 )
 from app.services.auth.permissions import Permission
+from app.services.filenames import ALLOWED_EXTENSIONS, name_from_url_path, safe_name
+from app.services.storage import Storage, get_storage, new_key
+from app.services.urlguard import (
+    UrlRejected,
+    check_http_target,
+    parse_s3_link,
+    parse_url,
+    redact_url,
+)
 from app.services.vectorstore import VectorStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-ALLOWED_EXTENSIONS: dict[str, str] = {
-    "pdf": "application/pdf",
-    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "txt": "text/plain",
-    "md": "text/markdown",
-}
 # Browsers/clients disagree on markdown and generic types, so the extension is authoritative;
 # the declared content type only has to be plausible.
 _GENERIC_TYPES = {"application/octet-stream", "binary/octet-stream", ""}
@@ -52,14 +65,14 @@ Session = Annotated[AsyncSession, Depends(get_session)]
 Cfg = Annotated[Settings, Depends(get_settings)]
 
 
-def _safe_name(name: str) -> str:
-    base = Path(name.replace("\\", "/")).name
-    cleaned = re.sub(r"[^A-Za-z0-9._ -]", "_", base).strip(" .")
-    return cleaned[:200] or "upload"
+_safe_name = safe_name
 
 
-async def _store_upload(file: UploadFile, cfg: Settings) -> tuple[str, Path, str]:
-    """Validate and stream an upload to disk. Returns (filename, relative path, extension)."""
+async def _store_upload(file: UploadFile, cfg: Settings) -> tuple[str, str, str, Storage]:
+    """Validate and stream an upload, then hand it to the configured storage.
+
+    Returns (filename, storage key, extension, storage).
+    """
     filename = _safe_name(file.filename or "")
     ext = Path(filename).suffix.lstrip(".").lower()
     if ext not in ALLOWED_EXTENSIONS:
@@ -73,12 +86,13 @@ async def _store_upload(file: UploadFile, cfg: Settings) -> tuple[str, Path, str
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, f"Unsupported content type '{declared}'."
         )
 
-    rel_dir = Path("uploads") / uuid.uuid4().hex
-    target_dir = cfg.data_dir / rel_dir
-    target_dir.mkdir(parents=True, exist_ok=True)
+    storage = get_storage(cfg)
+    key = new_key(filename)
+    tmp_dir = Path(tempfile.mkdtemp(prefix="rag-upload-"))
+    tmp = tmp_dir / "upload"
     size = 0
     try:
-        with (target_dir / filename).open("wb") as out:
+        with tmp.open("wb") as out:
             while chunk := await file.read(_CHUNK):
                 size += len(chunk)
                 if size > cfg.max_upload_size_bytes:
@@ -89,18 +103,23 @@ async def _store_upload(file: UploadFile, cfg: Settings) -> tuple[str, Path, str
                 out.write(chunk)
         if size == 0:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Uploaded file is empty.")
+        await asyncio.to_thread(storage.put_file, key, tmp, ALLOWED_EXTENSIONS[ext])
     except BaseException:
-        shutil.rmtree(target_dir, ignore_errors=True)
+        await asyncio.to_thread(_drop, storage, key)
         raise
-    return filename, rel_dir / filename, ext
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+    return filename, key, ext, storage
 
 
-def _remove_upload_dir(cfg: Settings, source_path: str | None) -> None:
-    """Remove a per-upload directory (only ever our own ``uploads/<id>`` dirs)."""
-    if source_path:
-        parent = (cfg.data_dir / source_path).parent
-        if parent.parent == cfg.data_dir / "uploads":
-            shutil.rmtree(parent, ignore_errors=True)
+def _drop(storage: Storage, key: str | None) -> None:
+    """Remove a stored file's directory; storage failures never mask the caller's real outcome."""
+    if not key:
+        return
+    try:
+        storage.delete_dir(key)
+    except Exception:
+        logger.warning("could not remove stored file %s", key, exc_info=True)
 
 
 async def _enqueue_job(
@@ -131,15 +150,93 @@ async def upload_document(
     cfg: Cfg,
     enqueue: Annotated[Enqueue, Depends(get_enqueue)],
 ) -> UploadResponse:
-    filename, rel_path, ext = await _store_upload(file, cfg)
+    filename, key, ext, storage = await _store_upload(file, cfg)
     doc = await ops.create_document(
         filename=filename,
         content_type=ALLOWED_EXTENSIONS[ext],
-        source_path=str(rel_path),
+        source_path=key,
+        storage_backend=storage.name,
         session=session,
     )
     job = await _enqueue_job(session, enqueue, doc.id)
     return UploadResponse(document=DocumentOut.model_validate(doc), job=job)
+
+
+_ERR = {"description": "Error", "content": {"application/json": {"example": {"detail": "message"}}}}
+
+
+@router.post(
+    "/documents/from-url",
+    response_model=UploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))],
+    summary="Ingest a document from an http(s) link or s3:// object",
+    responses={
+        400: {**_ERR, "description": "Link refused (bad scheme, credentials in URL, private/internal address, bucket not allowed, unresolvable host, S3 not configured)."},
+        401: _ERR,
+        403: _ERR,
+        503: {**_ERR, "description": "Broker unavailable; nothing was queued."},
+    },
+)
+async def ingest_from_url(
+    body: FromUrlRequest,
+    session: Session,
+    cfg: Cfg,
+    enqueue: Annotated[EnqueueUrl, Depends(get_enqueue_url)],
+) -> UploadResponse:
+    """Create a document from a link and queue its ingestion (`202`-style: returns immediately).
+
+    The API only **validates** the link (scheme allow-list `URL_INGEST_SCHEMES`, no embedded
+    credentials, SSRF check: the host is resolved and every address must be public). The
+    **download happens in the worker**, with a streaming size cap (`URL_INGEST_MAX_BYTES`),
+    timeouts, redirect re-validation and file-type checks; then the normal parse/chunk/embed
+    pipeline runs. Poll `GET /jobs/{job.id}`: `stats.source_url` (query string removed) and
+    `stats.bytes_downloaded` appear once the file is fetched; `error` explains failures.
+
+    The document's `filename` is provisional until the download finishes. Submitting a link that
+    was ingested before creates a **new** document - there is no de-duplication by URL.
+    `s3://bucket/key` reads with the server's S3 credentials and only from buckets listed in
+    `URL_INGEST_S3_BUCKETS` (default: `S3_BUCKET`).
+    """
+    url = body.url.strip()
+    try:
+        parsed = parse_url(url, schemes=cfg.url_schemes)
+        if parsed.scheme == "s3":
+            if not cfg.s3_configured and not cfg.url_ingest_s3_buckets:
+                raise UrlRejected("s3:// links need S3 to be configured on the server.")
+            link = parse_s3_link(url, allowed_buckets=cfg.url_s3_buckets)
+            name = safe_name(link.key.rsplit("/", 1)[-1])
+        else:
+            await asyncio.to_thread(
+                check_http_target,
+                url,
+                schemes=cfg.url_schemes,
+                allow_private=cfg.url_ingest_allow_private,
+            )
+            name = name_from_url_path(parsed.path_query.split("?", 1)[0]) or "download"
+    except UrlRejected as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+    doc = await ops.create_document(
+        filename=name,
+        content_type="application/octet-stream",
+        source_url=redact_url(url),
+        storage_backend=cfg.storage_backend,
+        session=session,
+    )
+    job = await ops.create_job(document_id=doc.id, session=session)
+    try:
+        task_id = enqueue(str(job.id), url)
+    except Exception as exc:
+        logger.exception("could not enqueue url ingest for job %s", job.id)
+        await ops.update_job_status(
+            job.id, JobStatus.FAILED, error=f"enqueue failed: {type(exc).__name__}", session=session
+        )
+        await ops.update_document_status(doc.id, DocumentStatus.FAILED, session=session)
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Could not enqueue ingestion (broker unavailable)."
+        ) from exc
+    refreshed = await ops.update_job_status(job.id, JobStatus.PENDING, task_id=task_id, session=session)
+    return UploadResponse(document=DocumentOut.model_validate(doc), job=JobOut.model_validate(refreshed or job))
 
 
 @router.put("/documents/{document_id}", response_model=UploadResponse, dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))])
@@ -154,20 +251,21 @@ async def replace_document(
     existing = await ops.get_document(document_id, session=session)
     if existing is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
-    old_source = existing.source_path
-    filename, rel_path, ext = await _store_upload(file, cfg)
+    old_source, old_backend = existing.source_path, existing.storage_backend
+    filename, key, ext, storage = await _store_upload(file, cfg)
     doc = await ops.replace_document_source(
         document_id,
         filename=filename,
         content_type=ALLOWED_EXTENSIONS[ext],
-        source_path=str(rel_path),
+        source_path=key,
+        storage_backend=storage.name,
         session=session,
     )
     if doc is None:  # deleted while uploading
-        _remove_upload_dir(cfg, str(rel_path))
+        await asyncio.to_thread(_drop, storage, key)
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
     job = await _enqueue_job(session, enqueue, doc.id)
-    _remove_upload_dir(cfg, old_source)
+    await asyncio.to_thread(_drop, get_storage(cfg, old_backend), old_source)
     return UploadResponse(document=DocumentOut.model_validate(doc), job=job)
 
 
@@ -216,7 +314,8 @@ async def delete_document(
     doc = await ops.get_document(document_id, session=session)
     if doc is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
-    source = doc.source_path
+    source, backend = doc.source_path, doc.storage_backend
     store.delete_doc(str(document_id))
     await ops.delete_document(document_id, session=session)
-    _remove_upload_dir(cfg, source)
+    # Best effort: a failure leaves an orphan the scheduled cleanup removes (never an error to the caller).
+    await asyncio.to_thread(_drop, get_storage(cfg, backend), source)

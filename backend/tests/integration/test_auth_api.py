@@ -29,6 +29,7 @@ GUARDED: list[tuple[str, str, Permission]] = [
     ("GET", f"/documents/{FAKE_ID}", Permission.DOCUMENTS_READ),
     ("GET", f"/documents/{FAKE_ID}/chunks", Permission.DOCUMENTS_READ),
     ("POST", "/documents", Permission.DOCUMENTS_WRITE),
+    ("POST", "/documents/from-url", Permission.DOCUMENTS_WRITE),
     ("PUT", f"/documents/{FAKE_ID}", Permission.DOCUMENTS_WRITE),
     ("DELETE", f"/documents/{FAKE_ID}", Permission.DOCUMENTS_DELETE),
     ("GET", f"/jobs/{FAKE_ID}", Permission.JOBS_READ),

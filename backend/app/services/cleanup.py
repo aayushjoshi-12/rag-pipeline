@@ -11,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import Document
+from app.services.storage import Storage, key_dir
 
 logger = structlog.get_logger(__name__)
 
@@ -46,4 +47,36 @@ async def cleanup_orphan_uploads(
         shutil.rmtree(entry, ignore_errors=True)
         removed.append(entry.name)
         logger.info("orphan_upload_removed", dir=entry.name)
+    return removed
+
+
+async def cleanup_orphan_objects(
+    session: AsyncSession,
+    storage: Storage,
+    *,
+    backend: str,
+    min_age_hours: float,
+    now: float | None = None,
+) -> list[str]:
+    """Remote-storage twin of ``cleanup_orphan_uploads``.
+
+    Removes objects that (a) ``storage.iter_objects`` reports - i.e. only keys under this app's
+    configured prefix and of the exact shape ``uploads/<32 hex>/<name>`` - (b) no Document of this
+    ``backend`` references, and (c) are older than ``min_age_hours``. Anything else in the bucket
+    (other prefixes, other key shapes, other tenants' data) is never listed, let alone deleted.
+    """
+    rows = (
+        await session.execute(
+            select(Document.source_path).where(Document.storage_backend == backend)
+        )
+    ).scalars().all()
+    referenced = {key_dir(p) for p in rows if p}
+    cutoff = (now if now is not None else time.time()) - min_age_hours * 3600
+    removed: list[str] = []
+    for obj in storage.iter_objects():
+        if key_dir(obj.key) in referenced or obj.modified > cutoff:
+            continue
+        storage.delete_object(obj.key)
+        removed.append(obj.key)
+        logger.info("orphan_object_removed", key=obj.key)
     return removed

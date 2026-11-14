@@ -15,6 +15,16 @@ x-backend-env: &backend-env
   SECRET_KEY: ${SECRET_KEY:-}
   ADMIN_EMAIL: ${ADMIN_EMAIL:-}
   ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  # File storage / URL ingest (docs/configuration.md). Defaults reproduce the pre-ticket-22
+  # behaviour (local disk); set them in the shell or .env, e.g. for the `s3` profile (MinIO).
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL_DOCKER:-${S3_ENDPOINT_URL:-}}
+  S3_BUCKET: ${S3_BUCKET:-}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_PREFIX: ${S3_PREFIX:-rag-pipeline/}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  URL_INGEST_ALLOW_PRIVATE: ${URL_INGEST_ALLOW_PRIVATE:-false}
 
 x-backend: &backend
   # One tag shared by api/worker/beat/migrate so Compose builds the backend image once.
@@ -66,6 +76,30 @@ services:
       # chromadb/chroma persists to /data (not /chroma/chroma): mounting the volume elsewhere silently
       # kept every vector in the container's writable layer, lost on any recreate.
       - chroma-data:/data
+
+  # Optional S3-compatible object store (real MinIO) for STORAGE_BACKEND=s3 / s3:// ingest. Only started
+  # with `docker compose --profile s3 up`; the default `docker compose up` is unchanged.
+  # Image: MinIO no longer publishes to Docker Hub/Quay, so the default is the last public Bitnami
+  # build (MinIO 2025.5.24, frozen); override with MINIO_IMAGE (e.g. your own mirror of minio/minio).
+  # Dev credentials only: override MINIO_ROOT_USER / MINIO_ROOT_PASSWORD outside a laptop.
+  minio:
+    image: ${MINIO_IMAGE:-bitnamilegacy/minio:latest}
+    container_name: rag-pipeline-minio
+    profiles: ["s3"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_DEFAULT_BUCKETS: ${S3_BUCKET:-rag-documents}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
 
   migrate:
     <<: *backend
@@ -135,3 +169,4 @@ volumes:
   appdata:
   pgdata:
   chroma-data:
+  minio-data:

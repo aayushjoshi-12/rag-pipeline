@@ -36,6 +36,19 @@ def get_enqueue() -> Enqueue:
     return _enqueue
 
 
+#: Enqueues a URL-ingest job: (job_id, full_url) -> broker task id.
+EnqueueUrl = Callable[[str, str], str]
+
+
+def get_enqueue_url() -> EnqueueUrl:
+    def _enqueue(job_id: str, url: str) -> str:
+        from app.tasks.ingest import process_document
+
+        return str(process_document.delay(job_id, url).id)
+
+    return _enqueue
+
+
 def get_store() -> VectorStore:
     return get_vector_store()
 

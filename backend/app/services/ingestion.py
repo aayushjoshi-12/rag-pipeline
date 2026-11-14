@@ -12,6 +12,7 @@ import asyncio
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -26,13 +27,18 @@ from app.observability import log_context
 from app.services import observability, traces
 from app.services.chunking import ChunkSpec, chunk_text
 from app.services.embeddings import Embedder
+from app.services.fetcher import Fetched, fetch_to_storage
 from app.services.incremental import old_chunks_from_rows, plan_update, vector_id
 from app.services.parser import ParseResult
+from app.services.storage import Storage, get_storage
 from app.services.vectorstore import VectorStore
 
 logger = structlog.get_logger(__name__)
 
 ParseFn = Callable[[Path, str, Settings], ParseResult]
+#: (url, settings, storage) -> Fetched; blocking, runs in a thread. Tests inject fakes.
+FetchFn = Callable[[str, Settings, Storage], Fetched]
+StorageFactory = Callable[[Settings, str | None], Storage]
 
 _EMBED_BATCH = 32
 _MAX_ERROR_CHARS = 2000
@@ -64,11 +70,20 @@ async def ingest_document(
     parse_fn: ParseFn,
     embedder: Embedder,
     store: VectorStore,
+    fetch_url: str | None = None,
+    fetch_fn: FetchFn = fetch_to_storage,
+    storage_factory: StorageFactory = get_storage,
 ) -> JobStatus:
-    """Run the ingest for ``job_id``. Never raises; the outcome lives on the job row."""
+    """Run the ingest for ``job_id``. Never raises; the outcome lives on the job row.
+
+    ``fetch_url`` is the full link of a URL-ingested document that has not been downloaded yet; it
+    is deliberately not stored in the DB (it may carry a presigned-URL secret).
+    """
     with log_context(job_id=str(job_id)), observability.span("ingest.document", job_id=str(job_id)) as root:
         started = time.perf_counter()
-        status = await _ingest(job_id, session, settings, parse_fn, embedder, store)
+        status = await _ingest(
+            job_id, session, settings, parse_fn, embedder, store, fetch_url, fetch_fn, storage_factory
+        )
         await _record_trace(job_id, status, started, session, settings)
         root.update(output=status.value)
         if status != JobStatus.DONE:
@@ -99,6 +114,9 @@ async def _ingest(
     parse_fn: ParseFn,
     embedder: Embedder,
     store: VectorStore,
+    fetch_url: str | None,
+    fetch_fn: FetchFn,
+    storage_factory: StorageFactory,
 ) -> JobStatus:
     job = await ops.get_job(job_id, session=session)
     if job is None:
@@ -115,13 +133,42 @@ async def _ingest(
         doc = await ops.get_document(doc_id, session=session)
         if doc is None:
             raise IngestError(f"document {doc_id} not found")
-        path = resolve_source_path(doc, settings)
-        if not path.is_file():
-            raise IngestError(f"source file not found: {path}")
+        link_stats: dict[str, object] = {}
+        if doc.source_url and not doc.source_path:
+            if not fetch_url:
+                raise IngestError(
+                    "this document is waiting for its download link, which is not available any "
+                    "more; submit the link again"
+                )
+            with observability.span("ingest.fetch", url=doc.source_url):
+                fetched = await asyncio.to_thread(
+                    fetch_fn, fetch_url, settings, storage_factory(settings, None)
+                )
+            doc = await ops.set_document_source(
+                doc_id,
+                filename=fetched.filename,
+                content_type=fetched.content_type,
+                source_path=fetched.key,
+                storage_backend=fetched.storage,
+                session=session,
+            ) or doc
+            link_stats = {
+                "source_url": fetched.source_url,
+                "bytes_downloaded": fetched.size,
+                "storage": fetched.storage,
+            }
+            await ops.update_job_status(job_id, JobStatus.RUNNING, stats=link_stats, session=session)
+        if not doc.source_path:
+            raise IngestError("document has no source_path")
 
-        with observability.span("ingest.parse", filetype=_filetype(doc)) as sp:
-            parsed = await asyncio.to_thread(parse_fn, path, _filetype(doc), settings)
-            sp.update(metadata={"provider": parsed.provider, "chars": len(parsed.text)})
+        storage = storage_factory(settings, doc.storage_backend)
+        with ExitStack() as stack:
+            path = await asyncio.to_thread(stack.enter_context, storage.local_path(doc.source_path))
+            if not path.is_file():
+                raise IngestError(f"source file not found: {path}")
+            with observability.span("ingest.parse", filetype=_filetype(doc)) as sp:
+                parsed = await asyncio.to_thread(parse_fn, path, _filetype(doc), settings)
+                sp.update(metadata={"provider": parsed.provider, "chars": len(parsed.text)})
         with observability.span("ingest.chunk") as sp:
             specs = chunk_text(
                 parsed.text,
@@ -206,6 +253,7 @@ async def _ingest(
             await ops.create_chunks(document_id=doc_id, chunks=chunk_dicts, session=session)
 
         stats: dict[str, object] = {
+            **link_stats,
             "mode": plan.mode,
             "reason": plan.reason,
             "chunks_total": len(specs),

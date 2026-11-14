@@ -11,6 +11,10 @@ export interface JobStats {
   added: number
   removed: number
   embedded: number
+  /** Present for documents ingested from a link: the URL (query string removed) and size fetched. */
+  source_url?: string
+  bytes_downloaded?: number
+  storage?: string
 }
 
 export interface Job {
@@ -29,6 +33,8 @@ export interface Document {
   filename: string
   content_type: string
   status: DocumentStatus
+  /** Link the document was ingested from (credentials/query removed); null for uploads. */
+  source_url?: string | null
   created_at: string
   updated_at: string
 }

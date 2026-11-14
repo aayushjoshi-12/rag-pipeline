@@ -46,6 +46,10 @@ class Document(Base):
         String(20), default=DocumentStatus.PENDING
     )
     source_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    #: Where ``source_path`` (a storage key) lives: ``local`` or ``s3`` (migration 0006).
+    storage_backend: Mapped[str] = mapped_column(String(16), default="local", server_default="local")
+    #: The link a document was ingested from, with query string/credentials removed. NULL for uploads.
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         server_default=func.now(), default=_utcnow
     )

@@ -54,6 +54,9 @@ RETRIEVAL_MODES = ("semantic", "keyword", "hybrid")
 KEYWORD_METHODS = ("bm25", "postgres_fts")
 FUSION_METHODS = ("rrf", "weighted")
 
+STORAGE_BACKENDS = ("local", "s3")
+URL_SCHEMES = ("http", "https", "s3")
+
 _PLACEHOLDER_KEYS: frozenset[str] = frozenset({"change-me", "replace-me", "changeme", "secret"})
 
 #: Fields that are secrets and must NEVER appear in config/config.<env>.json.
@@ -67,6 +70,8 @@ SECRET_FIELD_NAMES: frozenset[str] = frozenset(
         "admin_password",
         "langfuse_public_key",
         "langfuse_secret_key",
+        "s3_access_key_id",
+        "s3_secret_access_key",
     }
 )
 
@@ -199,6 +204,29 @@ class Settings(BaseSettings):
     #: Traces older than this many days are purged by the scheduled cleanup task.
     trace_retention_days: int = 30
 
+    # ── File storage (local default; S3-compatible optional) + URL ingest (docs/configuration.md) ──
+    storage_backend: str = "local"
+    #: Custom endpoint for S3-compatible stores (MinIO, Ceph, ...). Empty = AWS.
+    s3_endpoint_url: str = ""
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    #: Key prefix under which this app keeps (and only ever deletes) its objects.
+    s3_prefix: str = "rag-pipeline/"
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    #: Which URL schemes POST /documents/from-url accepts (comma separated subset of http,https,s3).
+    url_ingest_schemes: str = "http,https,s3"
+    #: s3:// links may only read these buckets (comma separated). Empty = only S3_BUCKET.
+    url_ingest_s3_buckets: str = ""
+    #: Disable the private/loopback/link-local/metadata address block. Tests and smoke runs only.
+    url_ingest_allow_private: bool = False
+    #: Per-operation (connect / read) timeout and overall deadline for one download.
+    url_ingest_timeout_seconds: float = 20.0
+    url_ingest_total_timeout_seconds: float = 120.0
+    url_ingest_max_redirects: int = 5
+    #: Download size cap in bytes. None = MAX_UPLOAD_SIZE_BYTES.
+    url_ingest_max_bytes: int | None = None
+
     # ── Persistence ──────────────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
 
@@ -325,6 +353,7 @@ class Settings(BaseSettings):
         if not 0 <= self.retrieval_neighbors <= MAX_NEIGHBORS:
             raise SettingsError(f"retrieval_neighbors must be within 0..{MAX_NEIGHBORS}.")
         self._validate_retrieval()
+        self._validate_storage()
         if self.trace_retention_days < 1:
             raise SettingsError("trace_retention_days must be >= 1.")
         if self.cleanup_orphan_age_hours < 0:
@@ -335,6 +364,59 @@ class Settings(BaseSettings):
                 "parser_max_completion_tokens must be within 256..32000."
             )
         return self
+
+    @property
+    def url_schemes(self) -> tuple[str, ...]:
+        return tuple(x.strip().lower() for x in self.url_ingest_schemes.split(",") if x.strip())
+
+    @property
+    def url_s3_buckets(self) -> tuple[str, ...]:
+        names = tuple(x.strip() for x in self.url_ingest_s3_buckets.split(",") if x.strip())
+        return names or ((self.s3_bucket,) if self.s3_bucket else ())
+
+    @property
+    def url_max_bytes(self) -> int:
+        return self.url_ingest_max_bytes or self.max_upload_size_bytes
+
+    @property
+    def s3_key_prefix(self) -> str:
+        """``S3_PREFIX`` normalised: no leading slash, one trailing slash (or empty)."""
+        prefix = self.s3_prefix.strip().lstrip("/")
+        return prefix if not prefix or prefix.endswith("/") else prefix + "/"
+
+    @property
+    def s3_configured(self) -> bool:
+        return bool(self.s3_bucket)
+
+    def _validate_storage(self) -> None:
+        if self.storage_backend not in STORAGE_BACKENDS:
+            raise SettingsError(
+                f"Unknown STORAGE_BACKEND '{self.storage_backend}'. Allowed: {', '.join(STORAGE_BACKENDS)}."
+            )
+        if self.storage_backend == "s3" and not self.s3_bucket:
+            raise SettingsError("STORAGE_BACKEND=s3 requires S3_BUCKET.")
+        if bool(self.s3_access_key_id) != bool(self.s3_secret_access_key):
+            raise SettingsError("S3_ACCESS_KEY_ID and S3_SECRET_ACCESS_KEY must be set together.")
+        if self.s3_endpoint_url and not self.s3_endpoint_url.startswith(("http://", "https://")):
+            raise SettingsError("S3_ENDPOINT_URL must be an http(s) URL.")
+        if ".." in self.s3_prefix.split("/"):
+            raise SettingsError("S3_PREFIX must not contain '..'.")
+        bad = [x for x in self.url_schemes if x not in URL_SCHEMES]
+        if bad or not self.url_schemes:
+            raise SettingsError(
+                f"Unknown URL_INGEST_SCHEMES {bad or self.url_ingest_schemes!r}. "
+                f"Allowed: {', '.join(URL_SCHEMES)} (comma separated, at least one)."
+            )
+        if not 0 < self.url_ingest_timeout_seconds <= 600:
+            raise SettingsError("URL_INGEST_TIMEOUT_SECONDS must be within (0, 600].")
+        if not self.url_ingest_timeout_seconds <= self.url_ingest_total_timeout_seconds <= 3600:
+            raise SettingsError(
+                "URL_INGEST_TOTAL_TIMEOUT_SECONDS must be >= URL_INGEST_TIMEOUT_SECONDS and <= 3600."
+            )
+        if not 0 <= self.url_ingest_max_redirects <= 20:
+            raise SettingsError("URL_INGEST_MAX_REDIRECTS must be within 0..20.")
+        if self.url_ingest_max_bytes is not None and self.url_ingest_max_bytes < 1:
+            raise SettingsError("URL_INGEST_MAX_BYTES must be >= 1 (or unset).")
 
     def _validate_retrieval(self) -> None:
         for name, value, allowed in (

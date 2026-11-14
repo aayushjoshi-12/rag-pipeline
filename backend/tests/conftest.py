@@ -136,3 +136,61 @@ async def db_session(isolated_db_url: str) -> AsyncIterator[AsyncSession]:
     async with session_factory() as session:
         yield session
     await engine.dispose()
+
+
+# ── Real MinIO (Compose profile `s3`: `docker compose --profile s3 up -d minio`) ────────────────────
+
+MINIO_ENDPOINT = os.environ.get("TEST_S3_ENDPOINT_URL", "http://localhost:9000")
+MINIO_KEY = os.environ.get("TEST_S3_ACCESS_KEY_ID", "minioadmin")
+MINIO_SECRET = os.environ.get("TEST_S3_SECRET_ACCESS_KEY", "minioadmin")
+
+
+@pytest.fixture(scope="module")
+def minio_bucket() -> Iterator[str]:
+    """A throwaway bucket on the real MinIO; skipped with a clear message when it is not running."""
+    import boto3
+    from botocore.config import Config
+
+    client = boto3.client(
+        "s3",
+        endpoint_url=MINIO_ENDPOINT,
+        aws_access_key_id=MINIO_KEY,
+        aws_secret_access_key=MINIO_SECRET,
+        region_name="us-east-1",
+        config=Config(s3={"addressing_style": "path"}, connect_timeout=2, retries={"max_attempts": 1}),
+    )
+    name = f"rag-test-{uuid.uuid4().hex[:12]}"
+    try:
+        client.create_bucket(Bucket=name)
+    except Exception as exc:
+        pytest.skip(
+            f"MinIO not reachable at {MINIO_ENDPOINT} ({type(exc).__name__}); "
+            "start it with `docker compose --profile s3 up -d minio`"
+        )
+    try:
+        yield name
+    finally:
+        for page in client.get_paginator("list_objects_v2").paginate(Bucket=name):
+            for obj in page.get("Contents", []):
+                client.delete_object(Bucket=name, Key=obj["Key"])
+        client.delete_bucket(Bucket=name)
+
+
+@pytest.fixture
+def s3_client(minio_bucket: str) -> Any:
+    from app.services.storage import make_s3_client
+
+    return make_s3_client(minio_settings(minio_bucket))
+
+
+def minio_settings(bucket: str, **kw: Any) -> Settings:
+    kw.setdefault("s3_prefix", "test-prefix/")
+    return Settings(
+        storage_backend="s3",
+        s3_endpoint_url=MINIO_ENDPOINT,
+        s3_bucket=bucket,
+        s3_access_key_id=MINIO_KEY,
+        s3_secret_access_key=MINIO_SECRET,
+        auth_enabled=False,
+        **kw,
+    )

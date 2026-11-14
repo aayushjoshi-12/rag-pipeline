@@ -20,7 +20,7 @@ def test_job_table_name() -> None:
 
 def test_document_has_expected_columns() -> None:
     cols = {c.name for c in Document.__table__.columns}
-    assert cols == {"id", "filename", "content_type", "status", "source_path", "created_at", "updated_at"}
+    assert cols == {"id", "filename", "content_type", "status", "source_path", "storage_backend", "source_url", "created_at", "updated_at"}
 
 
 def test_chunk_has_expected_columns() -> None:

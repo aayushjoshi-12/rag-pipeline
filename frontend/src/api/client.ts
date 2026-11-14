@@ -157,6 +157,11 @@ export const api = {
     form.append('file', file)
     return request<UploadResponse>('/documents', { method: 'POST', body: form })
   },
+  ingestUrl: (url: string) =>
+    request<UploadResponse>('/documents/from-url', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
   replace: (id: string, file: File) => {
     const form = new FormData()
     form.append('file', file)

@@ -9,7 +9,8 @@ from sqlalchemy.pool import NullPool
 from app.celery_app import celery_app
 from app.config import Settings
 from app.services import traces
-from app.services.cleanup import cleanup_orphan_uploads
+from app.services.cleanup import cleanup_orphan_objects, cleanup_orphan_uploads
+from app.services.storage import S3Storage
 
 logger = structlog.get_logger(__name__)
 
@@ -22,6 +23,16 @@ async def _run() -> int:
             removed = await cleanup_orphan_uploads(
                 session, settings.data_dir, min_age_hours=settings.cleanup_orphan_age_hours
             )
+            if settings.storage_backend == "s3":
+                try:
+                    removed += await cleanup_orphan_objects(
+                        session,
+                        S3Storage(settings),
+                        backend="s3",
+                        min_age_hours=settings.cleanup_orphan_age_hours,
+                    )
+                except Exception:
+                    logger.exception("s3_orphan_cleanup_failed")
             purged = await traces.purge_older_than(session, settings.trace_retention_days)
             if purged:
                 logger.info("traces_purged", count=purged)
