@@ -8,6 +8,8 @@ is never accepted as a command-line argument.
 ``python -m app.manage vector-status`` prints the configured vs stored vector settings.
 ``python -m app.manage reindex [--force] [--queue]`` rebuilds the vector store from the stored chunk
 text after changing VECTOR_* / embedding settings (``--queue`` hands it to a Celery worker).
+``python -m app.manage fts-status`` / ``rebuild-fts`` show / recreate the keyword-search columns with
+RETRIEVAL_FTS_CONFIG (needed after changing that setting).
 ``python -m app.manage rebuild-index`` retrains the pgvector ANN index on the current rows
 (IVFFlat after bulk loads) without re-embedding.
 """
@@ -64,6 +66,26 @@ async def reindex(force: bool) -> dict[str, object]:
     return {"documents": res.documents, "vectors": res.vectors, "seconds": round(res.seconds, 1)}
 
 
+async def fts_status() -> dict[str, object]:
+    from app.config import Settings
+    from app.services.keyword import stored_fts_config
+
+    async with async_session() as session:
+        stored = await stored_fts_config(session)
+    configured = Settings().retrieval_fts_config
+    return {"configured": configured, "stored": stored, "ok": stored == configured}
+
+
+async def rebuild_fts_cmd() -> str:
+    from app.config import Settings
+    from app.services.keyword import rebuild_fts
+
+    config = Settings().retrieval_fts_config
+    async with async_session() as session:
+        await rebuild_fts(session, config)
+    return f"keyword index rebuilt with text-search configuration '{config}'"
+
+
 def rebuild_index() -> str:
     from app.services.vectorstore import get_vector_store
 
@@ -85,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     rx = sub.add_parser("reindex", help="re-embed all stored chunks into a fresh vector store")
     rx.add_argument("--force", action="store_true", help="run even if ingest jobs are running")
     rx.add_argument("--queue", action="store_true", help="enqueue the Celery task instead of running inline")
+    sub.add_parser("fts-status", help="show configured vs stored keyword-search configuration")
+    sub.add_parser("rebuild-fts", help="recreate the keyword-search columns/index with RETRIEVAL_FTS_CONFIG")
     sub.add_parser("rebuild-index", help="rebuild the pgvector ANN index on the current rows")
     args = parser.parse_args(argv)
 
@@ -105,6 +129,13 @@ def main(argv: list[str] | None = None) -> int:
         except ReindexError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
+        return 0
+    if args.command == "fts-status":
+        info = asyncio.run(fts_status())
+        print(json.dumps(info))
+        return 0 if info["ok"] else 1
+    if args.command == "rebuild-fts":
+        print(asyncio.run(rebuild_fts_cmd()))
         return 0
     if args.command == "rebuild-index":
         print(rebuild_index())

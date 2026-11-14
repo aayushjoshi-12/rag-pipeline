@@ -14,7 +14,7 @@ from app.main import app
 from app.routers import deps
 from app.services import traces
 from app.services.llm import Completion, LLMRequestError, LLMUnavailableError
-from app.services.retriever import retrieve
+from app.services.retriever import RetrievalOptions, retrieve
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -91,7 +91,8 @@ async def test_retrieve_builds_doc_filters(db_session: AsyncSession) -> None:
     a, b = await _doc(db_session), await _doc(db_session)
     store = FakeStore([])
     await retrieve("q", top_k=3, embedder=FakeEmbedder(), store=store, session=db_session)
-    assert store.last_filters is None and store.last_k == 3
+    # de-duplication on (default): the store is asked for the candidate pool, the result is cut to top_k
+    assert store.last_filters is None and store.last_k == 50
     await retrieve(
         "q", top_k=3, embedder=FakeEmbedder(), store=store, session=db_session, document_ids=[a]
     )
@@ -100,6 +101,11 @@ async def test_retrieve_builds_doc_filters(db_session: AsyncSession) -> None:
         "q", top_k=3, embedder=FakeEmbedder(), store=store, session=db_session, document_ids=[a, b]
     )
     assert store.last_filters == {"doc_id": {"$in": [str(a), str(b)]}}
+    await retrieve(
+        "q", top_k=3, embedder=FakeEmbedder(), store=store, session=db_session,
+        options=RetrievalOptions(dedupe=False),
+    )
+    assert store.last_k == 3  # no dedupe -> exactly top_k, the pre-ticket-23 behaviour
     assert (
         await retrieve("q", top_k=0, embedder=FakeEmbedder(), store=store, session=db_session) == []
     )
@@ -136,7 +142,7 @@ async def test_chat_returns_answer_with_sources(chat_client: Any, db_session: As
     assert body["answer"] == "The answer is 42 [1]."
     assert body["sources"][0]["filename"] == "facts.pdf"
     assert body["sources"][0]["chunk_index"] == 1 and body["sources"][0]["document_id"] == str(doc)
-    assert state["store"].last_k == 4  # settings.default_top_k
+    assert state["store"].last_k == 50  # candidate pool (>= settings.default_top_k=4), cut to 4 after de-duplication
     assert "Life is 42." in state["llm"].prompts[0] and "What is life?" in state["llm"].prompts[0]
 
 
@@ -153,7 +159,7 @@ async def test_chat_passes_document_filter_and_top_k(
     c, state = chat_client
     d = await _doc(db_session)
     await c.post("/chat", json={"question": "q", "document_ids": [str(d)], "top_k": 9})
-    assert state["store"].last_filters == {"doc_id": str(d)} and state["store"].last_k == 9
+    assert state["store"].last_filters == {"doc_id": str(d)} and state["store"].last_k == 50
 
 
 @pytest.mark.parametrize(
@@ -231,7 +237,7 @@ async def test_successful_chat_records_a_trace_with_tokens_model_and_hits(
     assert (t.prompt_tokens, t.completion_tokens, t.hits) == (120, 9, 2)
     assert t.error is None and t.duration_ms >= 0
     assert t.question is None  # content capture is off by default
-    assert t.meta == {"top_k": 4, "neighbors": 1, "document_filter": 0}
+    assert t.meta == {"top_k": 4, "neighbors": 1, "document_filter": 0, "mode": "semantic"}
     assert t.user_email is None  # auth disabled in this harness => anonymous
 
 

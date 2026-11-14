@@ -13,7 +13,7 @@ from app.config import Settings
 from app.db.engine import async_session, engine
 from app.observability import configure_for_server
 from app.routers import auth, chat, documents, health, traces
-from app.services import observability
+from app.services import keyword, observability, retriever
 from app.services.auth import accounts
 from app.services.langfuse import configure_from_settings
 from app.services.vectorstore import VectorStoreMismatchError, log_effective_settings
@@ -48,6 +48,20 @@ async def _seed_auth() -> None:
         logger.exception("auth seeding failed (is the database migrated?)")
 
 
+async def _check_keyword_index() -> None:
+    """Log the effective retrieval settings; when keyword search is on, check its index matches the config."""
+    retriever.log_effective_settings(settings)
+    if settings.retrieval_mode == "semantic":
+        return
+    try:
+        async with async_session() as session:
+            await keyword.ensure_fts(session, settings.retrieval_fts_config)
+    except keyword.KeywordIndexMismatchError as exc:
+        logger.error("%s", exc)
+    except Exception as exc:
+        logger.warning("keyword index not verified at startup: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_for_server(level=logging.getLevelName(settings.log_level))
@@ -61,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.warning("DB not reachable at startup: %s", exc)
     await _seed_auth()
     await asyncio.to_thread(log_effective_settings, settings=settings)
+    await _check_keyword_index()
     yield
     observability.flush()
     await engine.dispose()

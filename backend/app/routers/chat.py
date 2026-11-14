@@ -23,9 +23,10 @@ from app.services import observability, traces
 from app.services.auth.permissions import Permission
 from app.services.context import add_neighbor_context
 from app.services.embeddings import Embedder
+from app.services.keyword import KeywordIndexMismatchError
 from app.services.llm import LLM, LLMConfigError, LLMRequestError, LLMUnavailableError
 from app.services.qa import answer_question
-from app.services.retriever import retrieve
+from app.services.retriever import RetrievalOptions, retrieve
 from app.services.vectorstore import VectorStore, VectorStoreMismatchError
 
 logger = structlog.get_logger(__name__)
@@ -44,10 +45,11 @@ async def chat(
 ) -> ChatResponse:
     top_k = req.top_k or cfg.default_top_k
     neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
+    options = RetrievalOptions.from_settings(cfg, mode=req.mode, fusion=req.fusion)
     started = time.perf_counter()
     outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None, "prompt": None, "completion": None}
     try:
-        return await _chat(req, top_k, neighbors, session, cfg, embedder, store, llm, outcome)
+        return await _chat(req, top_k, neighbors, options, session, cfg, embedder, store, llm, outcome)
     except HTTPException as exc:
         outcome["error"] = str(exc.detail)
         raise
@@ -67,7 +69,12 @@ async def chat(
             hits=outcome["hits"],
             error=outcome["error"],
             question=req.question if cfg.trace_capture_content else None,
-            meta={"top_k": top_k, "neighbors": neighbors, "document_filter": len(req.document_ids or [])},
+            meta={
+                "top_k": top_k,
+                "neighbors": neighbors,
+                "document_filter": len(req.document_ids or []),
+                **options.trace_meta(),
+            },
         )
 
 
@@ -75,6 +82,7 @@ async def _chat(
     req: ChatRequest,
     top_k: int,
     neighbors: int,
+    options: RetrievalOptions,
     session: AsyncSession,
     cfg: Settings,
     embedder: Embedder,
@@ -89,10 +97,11 @@ async def _chat(
             input=req.question,
             top_k=top_k,
             document_filter=len(req.document_ids or []),
+            retrieval_mode=options.mode,
         ) as root,
     ):
         try:
-            with observability.span("chat.retrieve", top_k=top_k) as sp:
+            with observability.span("chat.retrieve", top_k=top_k, **options.trace_meta()) as sp:
                 chunks = await retrieve(
                     req.question,
                     top_k=top_k,
@@ -100,12 +109,16 @@ async def _chat(
                     store=store,
                     session=session,
                     document_ids=req.document_ids,
+                    options=options,
                 )
                 sp.update(metadata={"hits": len(chunks)})
             outcome["hits"] = len(chunks)
             if neighbors:
                 with observability.span("chat.context", neighbors=neighbors):
                     chunks = await add_neighbor_context(chunks, neighbors, session=session)
+        except KeywordIndexMismatchError as exc:
+            logger.error("keyword_index_mismatch", error=str(exc))
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         except VectorStoreMismatchError as exc:
             logger.error("vector_store_mismatch", problems=exc.problems)
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
@@ -137,6 +150,9 @@ async def _chat(
                     chunk_index=c.chunk_index,
                     filename=c.filename,
                     score=c.score,
+                    score_kind=c.score_kind,
+                    semantic_rank=c.semantic_rank,
+                    keyword_rank=c.keyword_rank,
                     is_hit=c.is_hit,
                 )
                 for c in result.sources

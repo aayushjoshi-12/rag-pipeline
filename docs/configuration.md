@@ -18,6 +18,17 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
 | `CHUNK_OVERLAP` | integer, `0 <= v < CHUNK_SIZE` (chars) | `100` | index-time | **Minimum** chunk length (nothing is repeated between chunks; the name is kept for compatibility). A smaller minimum resynchronises cut points faster after an edit but allows smaller chunks. |
 | `RETRIEVAL_NEIGHBORS` | integer `0..5` | `1` | query-time (per-request `neighbors` on `POST /chat`) | Besides each search hit, also give the LLM the N chunks before and after it from the same document (de-duplicated, in reading order, bounded by the 12,000-char prompt context budget; hits always keep priority). `0` = hits only. Response `sources[].is_hit` is `false` for context-only chunks. |
 | `DEFAULT_TOP_K` | integer >= 1 | `5` | query-time (per-request `top_k`) | Number of search hits (before neighbour expansion). |
+| `RETRIEVAL_MODE` | `semantic`, `keyword`, `hybrid` | `semantic` | query-time (per-request `mode` on `POST /chat`) | How chunks are found. `semantic` = embeddings only (the behaviour before ticket 23). `keyword` = Postgres full-text search with BM25 re-scoring, no embedding call. `hybrid` = both, fused. See [Retrieval modes](#retrieval-modes). |
+| `RETRIEVAL_KEYWORD_METHOD` | `bm25`, `postgres_fts` | `bm25` | query-time | `bm25`: true BM25 over an FTS candidate pool. `postgres_fts`: plain `ts_rank_cd` (faster, weaker ranking). Used by `keyword` and `hybrid`. |
+| `RETRIEVAL_FUSION` | `rrf`, `weighted` | `rrf` | query-time (per-request `fusion`) | How `hybrid` merges the two ranked lists. Ignored (but validated) in other modes. |
+| `RETRIEVAL_RRF_K` | integer `1..1000` | `60` | query-time | RRF constant: `score = sum 1/(k + rank)`. Larger = flatter (ranks matter less), smaller = the top ranks dominate. 60 is the value from the original RRF paper. |
+| `RETRIEVAL_WEIGHT_SEMANTIC`, `RETRIEVAL_WEIGHT_KEYWORD` | floats `>= 0`, not both 0 | `0.6`, `0.4` | query-time | Weights of `weighted` fusion. **Auto-normalised** to sum 1 (only their ratio matters: `3`/`1` = `0.75`/`0.25`); not required to sum to 1. |
+| `RETRIEVAL_CANDIDATES` | integer `1..500` | `50` | query-time | Size of each retriever's candidate list before fusion / the `top_k` cut (raised to `top_k` when that is larger). Also the over-fetch that lets de-duplication fill `top_k`. |
+| `RETRIEVAL_KEYWORD_POOL` | integer `1..5000` | `200` | query-time | BM25 only: how many FTS matches (best `ts_rank_cd` first) are re-scored with BM25. The one approximation of the keyword path. |
+| `BM25_K1` | float `0..10` | `1.2` | query-time | Term-frequency saturation (0 = tf ignored). Lucene/Elasticsearch default. |
+| `BM25_B` | float `0..1` | `0.75` | query-time | Length normalisation (0 = none, 1 = full). Lucene/Elasticsearch default. |
+| `RETRIEVAL_FTS_CONFIG` | Postgres text-search configuration name, e.g. `english`, `simple`, `german` | `english` | index-time (`python -m app.manage rebuild-fts`) | Tokenisation/stemming/stopwords of the keyword index (`chunks.fts`). See [Keyword index](#keyword-index-and-tokenisation). |
+| `RETRIEVAL_DEDUPE` | `true`, `false` | `true` | query-time | Keep only the best-ranked copy of chunks with identical text (duplicate uploads), in every mode. With `false`, `semantic` asks the vector store for exactly `top_k` (the pre-ticket-23 request). |
 | `VECTOR_STORE` | `chroma`, `pgvector` | `chroma` | reindex | Where vectors live. Chroma = the Chroma server (default, unchanged behaviour). pgvector = a table in the app's Postgres (`vector_items`, created automatically). |
 | `VECTOR_METRIC` | `cosine`, `l2`, `ip` | unset = store default: `l2` for Chroma, `cosine` for pgvector | reindex (pgvector with `VECTOR_INDEX=none`: query-time) | Distance function. Unset on Chroma keeps the metric an existing collection already has (Chroma's default is l2), so upgrading changes nothing. For length-normalised embeddings (mxbai-embed-large is) all three give the same ranking; the choice only matters for non-normalised models (`ip`) and for the score values. |
 | `VECTOR_INDEX` | `hnsw`, `ivfflat`, `none` | `hnsw` | reindex | ANN index. Chroma only has HNSW (`ivfflat`/`none` with `VECTOR_STORE=chroma` fail at startup). pgvector: `none` = exact scan (always correct, fine up to a few 10k vectors). |
@@ -107,3 +118,67 @@ If it fails part-way, run it again. Changing only a **query-time** knob (`HNSW_E
 `DEFAULT_TOP_K`) needs no reindex. Changing `EMBEDDING_MODEL` to one with a different dimension is detected by the
 dimension check; swapping to a different model with the *same* dimension is not detectable from the store, so
 reindex whenever you change the embedding model.
+
+## Retrieval modes
+
+`POST /chat` accepts optional `"mode": "semantic"|"keyword"|"hybrid"` and `"fusion": "rrf"|"weighted"` (anything else is a 422);
+omitted fields use the deployment settings above. `document_ids` filters every mode. Neighbour expansion
+(`RETRIEVAL_NEIGHBORS`) runs after retrieval, on whatever hits the mode produced.
+
+### What `score` means (the response says so in `sources[].score_kind`)
+
+Sources are always ordered best first. The number is **not comparable across modes**:
+
+| `score_kind` | Mode | Meaning | Better |
+|---|---|---|---|
+| `distance` | `semantic` | vector-store distance (see the score convention below) | lower |
+| `bm25` | `keyword` | BM25 value | higher |
+| `ts_rank_cd` | `keyword` + `postgres_fts` | Postgres cover-density rank | higher |
+| `rrf` | `hybrid` + `rrf` | `sum 1/(k + rank)` over the lists the chunk is in (max `2/(k+1)`) | higher |
+| `weighted` | `hybrid` + `weighted` | `w_s * norm_s + w_k * norm_k`, 0..1 | higher |
+
+In `hybrid`, `sources[].semantic_rank` / `keyword_rank` give the 1-based rank in each retriever's (de-duplicated) candidate list,
+or `null` when the chunk was not among that retriever's candidates. Traces record `mode`, `keyword_method` (keyword/hybrid),
+`fusion` (hybrid) and `candidates` in their `meta`.
+
+### Hybrid
+
+Both retrievers run with `RETRIEVAL_CANDIDATES` each (the vector search and the SQL search concurrently) and are fused:
+
+* **RRF**: `score(d) = sum_i 1/(k + rank_i(d))`, 1-based ranks, missing from a list = no term. Ignores raw scores, so nothing has to be made comparable.
+* **Weighted**: each list's raw scores are min-max normalised to `[0,1]` (best = 1; semantic distances are inverted first); a list whose
+  scores are all equal, including a single item, maps every item to 1.0; then `w_s*norm_s + w_k*norm_k` with the weights normalised to sum 1.
+  Because it is min-max over a candidate list, one extreme outlier flattens the rest; RRF has no such sensitivity, which is why it is the default.
+* Ties are broken by first appearance (semantic list first), so output is deterministic.
+* **De-duplication** identifies a passage by its whitespace-collapsed, case-folded text, so two uploads of the same document produce one
+  item (that collects the contributions of both copies) instead of filling several slots. If the keyword list is empty (noise or
+  stopword-only query, no matching term) the result is the semantic list alone.
+
+### Keyword index and tokenisation
+
+Migration `0005` adds `chunks.fts = to_tsvector('english', text)` and `chunks.fts_len` (token count) as *generated stored columns*
+(Postgres maintains them; ingestion is untouched) and a GIN index on `fts`. The question is tokenised by Postgres with the same
+configuration and the lexemes are OR-ed (an AND query, which `websearch_to_tsquery` would build, finds nothing for a natural-language question).
+
+* **IDs and numbers.** Postgres splits `B3-5.3-05` into `b3`, `-5.3`, `-05` and keeps numbers (`12`, `500.00`, `2025`) in both `simple` and `english`.
+  Matching the parts separately would rank `B3-5.3-04` almost as high as `B3-5.3-05`, so every ID-like token of the question (letters/digits joined by `- . / _`)
+  is also searched as an adjacent-lexeme phrase and, for BM25, scored as one extra term (idf from its document frequency, tf = 1). Tested explicitly.
+* **`english` vs `simple`.** Both keep IDs and numbers. `english` additionally drops stopwords (`what`, `does`, `the`) and stems (`waiting`, `waited` -> `wait`), which is
+  what natural-language questions over English documents need; `simple` keeps every token verbatim and is the right choice for non-English corpora
+  (or set the matching language, e.g. `german`). The default is `english` because the documents and questions this project targets are English.
+* **Changing it** is index-time: the configuration is baked into the generated columns. The app compares it with `RETRIEVAL_FTS_CONFIG` (catalog lookup) and
+  refuses keyword/hybrid searches with a 503 naming the fix instead of searching with the wrong tokenisation; the API also logs the mismatch at start.
+  `python -m app.manage fts-status` shows configured vs stored; `python -m app.manage rebuild-fts` recreates the columns and index (exclusive lock on `chunks`
+  while it runs, no re-embedding).
+
+### BM25 precisely
+
+`score(chunk) = sum over query terms t in chunk of idf(t) * tf (k1 + 1) / (tf + k1 (1 - b + b * len / avglen))`, with
+`idf(t) = ln(1 + (N - df + 0.5) / (df + 0.5))` (non-negative). `N` = all chunks, `avglen` = average token count of all chunks, `df` = chunks
+matching the term (exact, GIN-backed `count(*)`), `tf` = the term's position count in the chunk's tsvector, `len` = `fts_len`. All of these are computed
+by SQL over the whole corpus (not over the `document_ids` filter, so a chunk's score does not change with the filter).
+
+**The approximation:** the chunks that get a BM25 score are the top `RETRIEVAL_KEYWORD_POOL` (200) FTS matches by `ts_rank_cd`; a chunk BM25 would
+rank highly but `ts_rank_cd` ranks below the cut is never seen (tested). idf, length normalisation and tf are exact. Other limits: stopwords are not
+counted in lengths; Postgres stores at most 256 positions per lexeme (tf saturates there); at most 64 query terms are used (the rarest ones) and at most the
+first 2,000 characters of the question; dropped terms with no match in the corpus cost nothing.

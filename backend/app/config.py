@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -47,6 +49,10 @@ MAX_NEIGHBORS = 5
 VECTOR_STORES = ("chroma", "pgvector")
 VECTOR_METRICS = ("cosine", "l2", "ip")
 VECTOR_INDEXES = ("hnsw", "ivfflat", "none")
+
+RETRIEVAL_MODES = ("semantic", "keyword", "hybrid")
+KEYWORD_METHODS = ("bm25", "postgres_fts")
+FUSION_METHODS = ("rrf", "weighted")
 
 _PLACEHOLDER_KEYS: frozenset[str] = frozenset({"change-me", "replace-me", "changeme", "secret"})
 
@@ -242,6 +248,25 @@ class Settings(BaseSettings):
     default_top_k: int = 5
     #: Query-time: also give the LLM the N chunks before/after each hit (0 = hits only).
     retrieval_neighbors: int = 1
+    #: Query-time retrieval strategy (per-request ``mode`` / ``fusion`` on POST /chat). See docs/configuration.md.
+    retrieval_mode: str = "semantic"
+    retrieval_keyword_method: str = "bm25"
+    retrieval_fusion: str = "rrf"
+    retrieval_rrf_k: int = 60
+    #: Relative weights for ``weighted`` fusion; auto-normalised to sum 1 (only their ratio matters).
+    retrieval_weight_semantic: float = 0.6
+    retrieval_weight_keyword: float = 0.4
+    #: Per-retriever pool size before fusion / the top_k cut (the pool is at least top_k).
+    retrieval_candidates: int = 50
+    #: Postgres FTS matches pulled in (ranked by ts_rank_cd) to be re-scored with BM25.
+    retrieval_keyword_pool: int = 200
+    bm25_k1: float = 1.2
+    bm25_b: float = 0.75
+    #: Postgres text-search configuration baked into chunks.fts (``english`` stems + drops stopwords,
+    #: ``simple`` does neither). Index-time: change with ``python -m app.manage rebuild-fts``.
+    retrieval_fts_config: str = "english"
+    #: Drop chunks whose text is identical to a better-ranked one (duplicate uploads).
+    retrieval_dedupe: bool = True
 
     # ── Document parsing (see docs/adr/0002-document-parsing.md) ─────────────
     parser_provider: str = "openrouter"
@@ -299,6 +324,7 @@ class Settings(BaseSettings):
             raise SettingsError("chunk_size must be > 0 and 0 <= chunk_overlap < chunk_size.")
         if not 0 <= self.retrieval_neighbors <= MAX_NEIGHBORS:
             raise SettingsError(f"retrieval_neighbors must be within 0..{MAX_NEIGHBORS}.")
+        self._validate_retrieval()
         if self.trace_retention_days < 1:
             raise SettingsError("trace_retention_days must be >= 1.")
         if self.cleanup_orphan_age_hours < 0:
@@ -309,6 +335,41 @@ class Settings(BaseSettings):
                 "parser_max_completion_tokens must be within 256..32000."
             )
         return self
+
+    def _validate_retrieval(self) -> None:
+        for name, value, allowed in (
+            ("RETRIEVAL_MODE", self.retrieval_mode, RETRIEVAL_MODES),
+            ("RETRIEVAL_KEYWORD_METHOD", self.retrieval_keyword_method, KEYWORD_METHODS),
+            ("RETRIEVAL_FUSION", self.retrieval_fusion, FUSION_METHODS),
+        ):
+            if value not in allowed:
+                raise SettingsError(f"Unknown {name} '{value}'. Allowed: {', '.join(allowed)}.")
+        int_ranges = {
+            "retrieval_rrf_k": (self.retrieval_rrf_k, 1, 1000),
+            "retrieval_candidates": (self.retrieval_candidates, 1, 500),
+            "retrieval_keyword_pool": (self.retrieval_keyword_pool, 1, 5000),
+        }
+        for key, (number, low, high) in int_ranges.items():
+            if not low <= number <= high:
+                raise SettingsError(f"{key} must be within {low}..{high} (got {number}).")
+        floats = (self.bm25_k1, self.bm25_b, self.retrieval_weight_semantic, self.retrieval_weight_keyword)
+        if not all(math.isfinite(f) for f in floats):
+            raise SettingsError("BM25_K1, BM25_B and the RETRIEVAL_WEIGHT_* values must be finite numbers.")
+        if not 0 <= self.bm25_k1 <= 10:
+            raise SettingsError(f"bm25_k1 must be within 0..10 (got {self.bm25_k1}).")
+        if not 0 <= self.bm25_b <= 1:
+            raise SettingsError(f"bm25_b must be within 0..1 (got {self.bm25_b}).")
+        weights = (self.retrieval_weight_semantic, self.retrieval_weight_keyword)
+        if any(w < 0 for w in weights) or sum(weights) <= 0:
+            raise SettingsError(
+                "retrieval_weight_semantic / retrieval_weight_keyword must be >= 0 and not both 0 "
+                "(they are normalised to sum to 1)."
+            )
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,62}", self.retrieval_fts_config):
+            raise SettingsError(
+                f"retrieval_fts_config '{self.retrieval_fts_config}' must be a lowercase Postgres "
+                "text-search configuration name such as 'english' or 'simple'."
+            )
 
     def _validate_vector(self) -> None:
         if self.vector_store not in VECTOR_STORES:

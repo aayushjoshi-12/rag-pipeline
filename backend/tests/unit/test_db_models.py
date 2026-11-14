@@ -25,7 +25,7 @@ def test_document_has_expected_columns() -> None:
 
 def test_chunk_has_expected_columns() -> None:
     cols = {c.name for c in Chunk.__table__.columns}
-    assert cols == {"id", "document_id", "index", "text", "metadata", "vector"}
+    assert cols == {"id", "document_id", "index", "text", "metadata", "vector", "fts", "fts_len"}
 
 
 def test_job_has_expected_columns() -> None:

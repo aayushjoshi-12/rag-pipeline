@@ -77,7 +77,9 @@ swappable: `LLM_PROVIDER` (openrouter | openai | anthropic), `EMBEDDING_PROVIDER
 if chat returns a 502, check `DEFAULT_LLM_MODEL` against OpenRouter's current model list.
 `VECTOR_STORE` (chroma | pgvector), `VECTOR_METRIC`, `VECTOR_INDEX` (hnsw | ivfflat | none) and the HNSW / IVFFlat
 knobs choose where vectors live and how they are indexed; changing them on existing data is a
-`python -m app.manage reindex`. Every key is listed in [`docs/configuration.md`](docs/configuration.md).
+`python -m app.manage reindex`. `RETRIEVAL_MODE` (semantic | keyword | hybrid, also per request on `POST /chat`),
+`RETRIEVAL_KEYWORD_METHOD` (bm25 | postgres_fts), `RETRIEVAL_FUSION` (rrf | weighted) and the BM25 / RRF / weight knobs choose how chunks are
+found; `semantic` (embeddings only) is the default. Every key is listed in [`docs/configuration.md`](docs/configuration.md).
 
 ## API
 
@@ -138,6 +140,7 @@ Honest accounting of what has been exercised against real services versus only u
 | Incremental update | real stack: edit 1 paragraph of a 126-chunk doc, `PUT` → **1** chunk re-embedded, 124 reused | passed |
 | Incremental update on real revisions | Fannie Mae Selling Guide ch. B3-5, Oct 8 → Nov 5 2025 (real PDFs, real OCR): `PUT` reused **173/342** chunks, embedded 169 (a rebuild embeds 342) | passed (answer check after the update not run: LLM rate-limited) |
 | Vector store options (Chroma / pgvector, metric, HNSW / IVFFlat) | one contract-test suite on **both** stores against real Chroma + Postgres/pgvector (metric orderings and score values, filters, incremental-update primitives, `pg_indexes`, `EXPLAIN`), plus the real stack on chroma-l2, chroma-cosine, pgvector hnsw and pgvector ivfflat: 388 real chunks, mismatch detected at startup and fixed with `manage reindex` | passed (retrieval 8/12, hit@1 7/12 on all four: identical because the data is tiny and the embeddings normalised, so this shows nothing about ANN recall; the planner ignores both indexes at 388 rows, forced-index recall@5 vs exact: hnsw 1.00, ivfflat 0.97) |
+| Retrieval modes (semantic / keyword BM25 / hybrid RRF + weighted) | unit tests with hand-computed fusion and BM25 values; integration tests on real Postgres + real Chroma **and** pgvector (exact-ID query missed by semantic found by keyword/hybrid, paraphrase missed by keyword found by semantic/hybrid, filters, de-duplication, overrides, drift); real stack (Chroma and pgvector) on 388 real chunks, 12 labelled questions, 3 runs each, 0 LLM calls: hit/hit@1 semantic 8/7, BM25 keyword **10**/7, hybrid RRF 9/7, hybrid weighted 9/6, plain `ts_rank_cd` 5/1 | passed (see `tmp/smoke_tests/23-retrieval-modes-result.md`; **hybrid did not beat keyword-only on this corpus**; the section-ID question is found by keyword (rank 1) but hybrid RRF ranks it 20th; only 12 questions on one corpus, so differences of 1-2 questions are not significant; the dashboard has no mode control yet) |
 | Dashboard | real Chromium driving upload → live job → chat → delete | passed |
 | Traces + usage dashboard | real stack + real Chromium: real ingest (ok and corrupt-PDF failure), chat (LLM rate-limited → error traces), API/UI numbers cross-checked, charts reviewed in light/dark | passed (token chart with real token data not seen: LLM returned only 429s) |
 | Langfuse tracing | traces read back from a real Langfuse project | passed |
