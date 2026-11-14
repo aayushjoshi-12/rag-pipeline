@@ -128,3 +128,20 @@ def test_settings_customises_sources_includes_env_json(tmp_path: Path) -> None:
 
 
 _ = ValidationError  # keep import used for tooling/type-awareness
+
+
+@pytest.mark.parametrize("bad", [-1, 6, 100])
+def test_retrieval_neighbors_range_validated(clear_env: None, bad: int) -> None:
+    with pytest.raises(ValidationError, match="retrieval_neighbors"):
+        Settings(retrieval_neighbors=bad)
+
+
+@pytest.mark.parametrize("ok", [0, 1, 5])
+def test_retrieval_neighbors_accepts_range(clear_env: None, ok: int) -> None:
+    assert Settings(retrieval_neighbors=ok).retrieval_neighbors == ok
+
+
+@pytest.mark.parametrize(("size", "overlap"), [(0, 0), (100, 100), (100, 200), (100, -1)])
+def test_chunk_bounds_validated(clear_env: None, size: int, overlap: int) -> None:
+    with pytest.raises(ValidationError, match="chunk_size"):
+        Settings(chunk_size=size, chunk_overlap=overlap)

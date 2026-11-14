@@ -41,6 +41,9 @@ def _selected_environment() -> str | None:
     return rag_env if rag_env in _VALID_ENVIRONMENTS else None
 
 
+#: Upper bound for ``retrieval_neighbors`` (each hit expands to at most 2N+1 chunks).
+MAX_NEIGHBORS = 5
+
 _PLACEHOLDER_KEYS: frozenset[str] = frozenset({"change-me", "replace-me", "changeme", "secret"})
 
 #: Fields that are secrets and must NEVER appear in config/config.<env>.json.
@@ -214,9 +217,11 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
 
     # ── Chunking ─────────────────────────────────────────────────────────────
-    chunk_size: int = 512
-    chunk_overlap: int = 64
+    chunk_size: int = 1000
+    chunk_overlap: int = 100
     default_top_k: int = 5
+    #: Query-time: also give the LLM the N chunks before/after each hit (0 = hits only).
+    retrieval_neighbors: int = 1
 
     # ── Document parsing (see docs/adr/0002-document-parsing.md) ─────────────
     parser_provider: str = "openrouter"
@@ -271,6 +276,10 @@ class Settings(BaseSettings):
             )
         if self.incremental_max_churn is not None and self.incremental_max_churn < 0:
             raise SettingsError("incremental_max_churn must be >= 0 (or unset).")
+        if self.chunk_size <= 0 or not 0 <= self.chunk_overlap < self.chunk_size:
+            raise SettingsError("chunk_size must be > 0 and 0 <= chunk_overlap < chunk_size.")
+        if not 0 <= self.retrieval_neighbors <= MAX_NEIGHBORS:
+            raise SettingsError(f"retrieval_neighbors must be within 0..{MAX_NEIGHBORS}.")
         if self.trace_retention_days < 1:
             raise SettingsError("trace_retention_days must be >= 1.")
         if self.cleanup_orphan_age_hours < 0:

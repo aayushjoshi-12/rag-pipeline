@@ -9,6 +9,8 @@ class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     document_ids: list[uuid.UUID] | None = None
     top_k: int | None = Field(default=None, ge=1, le=50)
+    #: Override RETRIEVAL_NEIGHBORS for this request (chunks of context around each hit).
+    neighbors: int | None = Field(default=None, ge=0, le=5)
 
 
 class SourceOut(BaseModel):
@@ -17,6 +19,8 @@ class SourceOut(BaseModel):
     chunk_index: int
     filename: str
     score: float
+    #: False when this chunk is neighbouring context rather than a search hit.
+    is_hit: bool = True
 
 
 class ChatResponse(BaseModel):

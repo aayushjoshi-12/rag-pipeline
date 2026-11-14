@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import random
 from itertools import pairwise
 
@@ -30,6 +31,81 @@ def test_defaults_come_from_settings() -> None:
     assert chunk_text(text) == chunk_text(
         text, chunk_size=cfg.chunk_size, chunk_overlap=cfg.chunk_overlap
     )
+
+
+def _prose(n_sentences: int = 400, seed: int = 11) -> str:
+    """Synthetic multi-sentence prose with paragraphs, numbers and punctuation."""
+    rng = random.Random(seed)
+    vocab = [f"term{rng.randrange(5000)}" for _ in range(600)]
+    out: list[str] = []
+    for i in range(n_sentences):
+        sentence = " ".join(rng.choice(vocab) for _ in range(rng.randrange(5, 30)))
+        out.append(sentence.capitalize() + rng.choice([".", ".", ".", "?", ";"]))
+        if i % 7 == 6:
+            out.append("\n\n")
+        elif i % 3 == 0:
+            out.append("\n")  # PDF-style line wrap
+        else:
+            out.append(" ")
+    return "".join(out)
+
+
+def _mid_word(text: str, c: ChunkSpec) -> bool:
+    norm = text.replace("\r\n", "\n")
+    starts = c.start > 0 and not norm[c.start - 1].isspace() and not norm[c.start].isspace()
+    ends = c.end < len(norm) and not norm[c.end - 1].isspace() and not norm[c.end].isspace()
+    return starts or ends
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+@pytest.mark.parametrize(("size", "mn"), [(512, 64), (1000, 100), (200, 20)])
+def test_no_chunk_starts_or_ends_mid_word(seed: int, size: int, mn: int) -> None:
+    text = _prose(seed=seed) + _doc(1500, seed=seed)
+    chunks = chunk_text(text, chunk_size=size, chunk_overlap=mn)
+    assert len(chunks) > 10
+    assert not [c for c in chunks if _mid_word(text, c)]
+    words = text.split()
+    chunk_words = [w for c in chunks for w in c.text.split()]
+    assert chunk_words == words  # no word is split or lost
+
+
+def test_reassembly_equals_original_text() -> None:
+    text = _prose()
+    chunks = _chunks(text)
+    assert "".join(text[c.start : c.end] for c in chunks) == text
+    assert " ".join(" ".join(c.text.split()) for c in chunks) == " ".join(text.split())
+
+
+def test_cuts_prefer_sentence_ends() -> None:
+    text = _prose(800)
+    chunks = _chunks(text)
+    ends_with_punct = sum(1 for c in chunks[:-1] if c.text.rstrip()[-1] in ".!?:;")
+    assert ends_with_punct / (len(chunks) - 1) >= 0.7
+
+
+def test_edit_only_disturbs_chunks_near_it() -> None:
+    """Locality: a mid-document edit changes the chunks around it and nothing else."""
+    text = _prose(900)
+    mid = text.index(" ", len(text) // 2)
+    edited = text[:mid] + " An entirely inserted synthetic sentence about nothing at all." + text[mid:]
+    before, after = _chunks(text), _chunks(edited)
+    old_hashes = {c.content_hash for c in before}
+    new_hashes = {c.content_hash for c in after}
+    changed_new = [c for c in after if c.content_hash not in old_hashes]
+    changed_old = [c for c in before if c.content_hash not in new_hashes]
+    assert 1 <= len(changed_new) <= 4
+    assert len(changed_old) <= 4
+    # every changed chunk lies within a few chunks of the edit point
+    assert all(abs(c.start - mid) < 4 * SIZE for c in changed_new)
+
+
+def test_edit_that_rewraps_lines_keeps_chunks() -> None:
+    """Whitespace changes (line wrapping) must not move cut points through the hash."""
+    text = _prose(600)
+    rewrapped = text.replace("\n", " ")
+    a = {c.content_hash for c in _chunks(text)}
+    b = {c.content_hash for c in _chunks(rewrapped)}
+    assert len(a & b) / len(a) >= 0.8
 
 
 def test_size_cap_and_min_floor_honored() -> None:
@@ -139,6 +215,12 @@ def test_crlf_normalized() -> None:
 def test_content_hash_ignores_whitespace_differences() -> None:
     assert content_hash("a  b\n c ") == content_hash("a b c")
     assert content_hash("a b") != content_hash("a c")
+
+
+def test_fingerprint_differs_from_the_mid_word_v1_chunker() -> None:
+    """Indexes built by the old chunker (cdc-buzhash-v1) must be detected and rebuilt."""
+    v1 = hashlib.sha256(b"cdc-buzhash-v1|512|64|rag-pipeline-cdc|32").hexdigest()[:16]
+    assert chunker_fingerprint(512, 64) != v1
 
 
 def test_fingerprint_changes_with_config() -> None:

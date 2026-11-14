@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from app.services.context import MAX_CONTEXT_CHARS
 from app.services.llm import LLM, LLMConfigError
 from app.services.retriever import ChunkResult
 
@@ -17,7 +18,6 @@ SYSTEM_PROMPT = (
 
 NO_CONTEXT_ANSWER = "I couldn't find anything relevant in the ingested documents."
 
-_MAX_CONTEXT_CHARS = 12_000
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ def build_user_prompt(question: str, chunks: list[ChunkResult]) -> str:
     used = 0
     for i, c in enumerate(chunks, 1):
         block = f"[{i}] (source: {c.filename}, chunk {c.chunk_index})\n{c.text}"
-        if used + len(block) > _MAX_CONTEXT_CHARS and parts:
+        if used + len(block) > MAX_CONTEXT_CHARS and parts:
             break
         parts.append(block)
         used += len(block)

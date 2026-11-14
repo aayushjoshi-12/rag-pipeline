@@ -144,5 +144,5 @@ async def test_chat_emits_spans(db_session: AsyncSession, rec: Recorder) -> None
     finally:
         app.dependency_overrides.clear()
     assert r.status_code == 200
-    assert rec.names == ["chat.request", "chat.retrieve", "chat.answer"]
+    assert rec.names == ["chat.request", "chat.retrieve", "chat.context", "chat.answer"]
     assert dict(rec.spans[0][1])["top_k"] == Settings().default_top_k

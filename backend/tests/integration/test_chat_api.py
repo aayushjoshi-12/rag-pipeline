@@ -231,7 +231,7 @@ async def test_successful_chat_records_a_trace_with_tokens_model_and_hits(
     assert (t.prompt_tokens, t.completion_tokens, t.hits) == (120, 9, 2)
     assert t.error is None and t.duration_ms >= 0
     assert t.question is None  # content capture is off by default
-    assert t.meta == {"top_k": 4, "document_filter": 0}
+    assert t.meta == {"top_k": 4, "neighbors": 1, "document_filter": 0}
     assert t.user_email is None  # auth disabled in this harness => anonymous
 
 
@@ -267,3 +267,51 @@ async def test_a_request_with_no_hits_is_traced_as_ok_without_tokens(
     await c.post("/chat", json={"question": "nothing here"})
     t = (await _traces(db_session))[0]
     assert (t.status, t.hits, t.prompt_tokens) == ("ok", 0, None)
+
+
+async def _chunks(session: AsyncSession, doc: uuid.UUID, n: int) -> None:
+    await ops.create_chunks(
+        document_id=doc,
+        chunks=[{"index": i, "text": f"chunk-{i}", "metadata": {}} for i in range(n)],
+        session=session,
+    )
+
+
+async def test_chat_neighbors_adds_context_and_marks_hits(
+    chat_client: Any, db_session: AsyncSession
+) -> None:
+    c, state = chat_client
+    doc = await _doc(db_session, "rules.pdf")
+    await _chunks(db_session, doc, 6)
+    state["store"] = FakeStore([_hit(doc, 3, "chunk-3")])
+    r = await c.post("/chat", json={"question": "q", "neighbors": 1})
+    assert r.status_code == 200, r.text
+    srcs = r.json()["sources"]
+    assert [(s["chunk_index"], s["is_hit"]) for s in srcs] == [(2, False), (3, True), (4, False)]
+    prompt = state["llm"].prompts[0]
+    assert "chunk-2" in prompt and "chunk-4" in prompt
+    assert prompt.index("chunk-2") < prompt.index("chunk-3") < prompt.index("chunk-4")
+
+
+async def test_chat_default_is_hits_only_and_setting_applies(
+    chat_client: Any, db_session: AsyncSession
+) -> None:
+    c, state = chat_client
+    doc = await _doc(db_session)
+    await _chunks(db_session, doc, 6)
+    state["store"] = FakeStore([_hit(doc, 3, "chunk-3")])
+    app.dependency_overrides[deps.get_settings] = lambda: Settings(auth_enabled=False, retrieval_neighbors=0)
+    srcs = (await c.post("/chat", json={"question": "q"})).json()["sources"]
+    assert [s["chunk_index"] for s in srcs] == [3] and srcs[0]["is_hit"] is True
+    app.dependency_overrides[deps.get_settings] = lambda: Settings(auth_enabled=False, retrieval_neighbors=2)
+    srcs = (await c.post("/chat", json={"question": "q"})).json()["sources"]
+    assert [s["chunk_index"] for s in srcs] == [1, 2, 3, 4, 5]
+    # per-request override wins over the setting
+    srcs = (await c.post("/chat", json={"question": "q", "neighbors": 0})).json()["sources"]
+    assert [s["chunk_index"] for s in srcs] == [3]
+
+
+async def test_chat_neighbors_validated(chat_client: Any) -> None:
+    c, _ = chat_client
+    assert (await c.post("/chat", json={"question": "q", "neighbors": 9})).status_code == 422
+    assert (await c.post("/chat", json={"question": "q", "neighbors": -1})).status_code == 422

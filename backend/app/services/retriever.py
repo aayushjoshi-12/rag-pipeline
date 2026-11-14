@@ -20,6 +20,8 @@ class ChunkResult:
     chunk_index: int
     filename: str
     score: float
+    #: False for a neighbouring chunk added as context (see services/context.py)
+    is_hit: bool = True
 
 
 async def retrieve(

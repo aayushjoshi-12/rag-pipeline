@@ -211,6 +211,22 @@ async def list_chunks_by_document(
         return list(result.scalars().all())
 
 
+async def get_chunks_by_indexes(
+    document_id: uuid.UUID, indexes: Sequence[int], *, session: AsyncSession | None = None
+) -> list[Chunk]:
+    """The chunks of ``document_id`` whose ``index`` is in ``indexes`` (ordered by index)."""
+    if not indexes:
+        return []
+    async with AsyncExitStack() as stack:
+        sess = await _acquire(session, stack)
+        result = await sess.execute(
+            select(Chunk)
+            .where(Chunk.document_id == document_id, Chunk.index.in_(list(indexes)))
+            .order_by(Chunk.index)
+        )
+        return list(result.scalars().all())
+
+
 async def delete_chunks_by_document(
     document_id: uuid.UUID, *, session: AsyncSession | None = None
 ) -> int:

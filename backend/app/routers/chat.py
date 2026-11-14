@@ -21,6 +21,7 @@ from app.routers.deps import (
 from app.schema.chat import ChatRequest, ChatResponse, SourceOut
 from app.services import observability, traces
 from app.services.auth.permissions import Permission
+from app.services.context import add_neighbor_context
 from app.services.embeddings import Embedder
 from app.services.llm import LLM, LLMConfigError, LLMRequestError, LLMUnavailableError
 from app.services.qa import answer_question
@@ -42,10 +43,11 @@ async def chat(
     llm: Annotated[LLM | None, Depends(get_llm_dep)],
 ) -> ChatResponse:
     top_k = req.top_k or cfg.default_top_k
+    neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
     started = time.perf_counter()
     outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None, "prompt": None, "completion": None}
     try:
-        return await _chat(req, top_k, session, cfg, embedder, store, llm, outcome)
+        return await _chat(req, top_k, neighbors, session, cfg, embedder, store, llm, outcome)
     except HTTPException as exc:
         outcome["error"] = str(exc.detail)
         raise
@@ -65,13 +67,14 @@ async def chat(
             hits=outcome["hits"],
             error=outcome["error"],
             question=req.question if cfg.trace_capture_content else None,
-            meta={"top_k": top_k, "document_filter": len(req.document_ids or [])},
+            meta={"top_k": top_k, "neighbors": neighbors, "document_filter": len(req.document_ids or [])},
         )
 
 
 async def _chat(
     req: ChatRequest,
     top_k: int,
+    neighbors: int,
     session: AsyncSession,
     cfg: Settings,
     embedder: Embedder,
@@ -100,6 +103,9 @@ async def _chat(
                 )
                 sp.update(metadata={"hits": len(chunks)})
             outcome["hits"] = len(chunks)
+            if neighbors:
+                with observability.span("chat.context", neighbors=neighbors):
+                    chunks = await add_neighbor_context(chunks, neighbors, session=session)
         except Exception as exc:
             logger.exception("retrieval_failed")
             raise HTTPException(
@@ -128,6 +134,7 @@ async def _chat(
                     chunk_index=c.chunk_index,
                     filename=c.filename,
                     score=c.score,
+                    is_hit=c.is_hit,
                 )
                 for c in result.sources
             ],
