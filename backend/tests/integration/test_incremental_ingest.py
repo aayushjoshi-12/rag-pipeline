@@ -134,9 +134,22 @@ async def test_deleting_a_section_removes_its_vectors(env: Env) -> None:
     assert len(env.store.vectors) < n_before + 2
 
 
-async def test_rewriting_most_of_the_document_does_a_full_rebuild(env: Env) -> None:
+async def test_rewriting_most_of_the_document_is_still_incremental_by_default(env: Env) -> None:
+    """A total rewrite has nothing to reuse, but the update must still be correct and never embed
+    more than a rebuild would (the old 50% rule forced rebuilds even when half could be reused)."""
     env.text = make_text(seed=1)
     await env.run()
+    env.text = make_text(seed=2)
+    r = await env.run()
+    assert r["stats"]["mode"] == "incremental"
+    rows = await ops.list_chunks_by_document(env.doc_id, session=env.session)
+    assert env.store.texts_for(str(env.doc_id)) == {c.text for c in rows}
+
+
+async def test_max_churn_setting_restores_the_full_rebuild_guard(env: Env) -> None:
+    env.text = make_text(seed=1)
+    await env.run()
+    env.settings = Settings(incremental_max_churn=0.5)
     env.text = make_text(seed=2)
     r = await env.run()
     assert r["stats"]["mode"] == "full" and r["stats"]["reason"] == "most chunks changed"

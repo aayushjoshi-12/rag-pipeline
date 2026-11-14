@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 from app.services.incremental import (
-    FULL_REBUILD_CHURN,
     OldChunk,
     old_chunks_from_rows,
     plan_update,
@@ -56,19 +55,35 @@ def test_duplicate_chunks_share_one_vector() -> None:
     assert plan_update(old("a", "a", "b", "c"), ["a", "b", "c"], FP).remove_hashes == []
 
 
-def test_majority_change_falls_back_to_full_rebuild() -> None:
+def test_total_replacement_is_incremental_by_default_and_costs_the_same_as_full() -> None:
     plan = plan_update(old(*"abcd"), list("wxyz"), FP)
-    assert plan.mode == "full" and plan.reason == "most chunks changed"
-    assert plan.add_hashes == list("wxyz") and plan.remove_hashes == []
+    assert plan.mode == "incremental" and plan.reason == "no chunks in common"
+    assert plan.add_hashes == list("wxyz") and plan.remove_hashes == list("abcd") and plan.keep_hashes == []
 
 
-def test_churn_threshold_boundary() -> None:
-    # 10 old chunks: churn of exactly 50% (add 3 + remove 2 = 5) is still incremental, 6 is not
+def test_real_revision_shape_reuses_the_shared_vectors() -> None:
+    """Shape of the real Fannie Mae Selling Guide revision (ticket 21): 365 old chunks, 169 survive,
+    181 are new, 196 are gone. The old 50% rule rebuilt all 350; incremental embeds only the 181."""
+    shared = [f"s{i}" for i in range(169)]
+    gone = [f"g{i}" for i in range(196)]
+    fresh = [f"n{i}" for i in range(181)]
+    plan = plan_update(old(*shared, *gone), [*shared, *fresh], FP)
+    assert plan.mode == "incremental"
+    assert len(plan.keep_hashes) == 169
+    assert len(plan.add_hashes) == 181  # embedded, not 350
+    assert len(plan.remove_hashes) == 196
+
+
+def test_max_churn_is_an_opt_in_guard() -> None:
+    # 10 old chunks: churn of exactly 50% (add 3 + remove 2 = 5) is within a 0.5 limit, 6 is beyond it
     base = list("abcdefghij")
-    assert FULL_REBUILD_CHURN == 0.5
-    five = plan_update(old(*base), [*base[:8], "x", "y", "z"], FP)  # remove i,j ; add x,y,z = 5
-    six = plan_update(old(*base), [*base[:7], "x", "y", "z"], FP)  # remove h,i,j ; add 3 = 6
-    assert five.mode == "incremental" and six.mode == "full"
+    five = plan_update(old(*base), [*base[:8], "x", "y", "z"], FP, max_churn=0.5)  # remove i,j ; add x,y,z
+    six = plan_update(old(*base), [*base[:7], "x", "y", "z"], FP, max_churn=0.5)  # remove h,i,j ; add 3
+    assert five.mode == "incremental"
+    assert six.mode == "full" and six.reason == "most chunks changed"
+    assert six.add_hashes == [*base[:7], "x", "y", "z"]
+    # without the guard the same change is incremental
+    assert plan_update(old(*base), [*base[:7], "x", "y", "z"], FP).mode == "incremental"
 
 
 def test_fingerprint_mismatch_forces_full() -> None:

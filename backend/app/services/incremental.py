@@ -12,9 +12,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-#: Above this share of churn (added + removed vs old chunk count) a diff is not worth it.
-FULL_REBUILD_CHURN = 0.5
-
 
 def vector_id(doc_id: str, content_hash: str) -> str:
     """Content-addressed vector id: identical text in the same document shares one vector."""
@@ -56,8 +53,15 @@ def plan_update(
     old: Sequence[OldChunk],
     new_hashes: Sequence[str],
     new_fingerprint: str,
+    *,
+    max_churn: float | None = None,
 ) -> UpdatePlan:
-    """Decide between a full rebuild and an incremental update."""
+    """Decide between a full rebuild and an incremental update.
+
+    Incremental never embeds more than a full rebuild (it embeds only the added chunks), so by
+    default a heavily edited document is still updated incrementally. ``max_churn`` is an opt-in
+    guard: when (added + removed) / old chunk count exceeds it, rebuild from scratch instead.
+    """
     new_unique = list(dict.fromkeys(new_hashes))
     if not old:
         return UpdatePlan("full", "first ingest", add_hashes=new_unique)
@@ -72,7 +76,7 @@ def plan_update(
     remove = [h for h in old_unique if h not in new_set]
     keep = [h for h in new_unique if h in old_set]
 
-    if (len(add) + len(remove)) > FULL_REBUILD_CHURN * len(old_unique):
+    if max_churn is not None and (len(add) + len(remove)) > max_churn * len(old_unique):
         return UpdatePlan("full", "most chunks changed", add_hashes=new_unique)
     return UpdatePlan(
         "incremental",

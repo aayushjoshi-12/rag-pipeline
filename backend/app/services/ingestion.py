@@ -118,6 +118,7 @@ async def _ingest(
             old_chunks_from_rows([dict(r.metadata_) for r in old_rows]),
             [s.content_hash for s in specs],
             specs[0].chunker_fingerprint,
+            max_churn=settings.incremental_max_churn,
         )
         first_spec: dict[str, ChunkSpec] = {}
         for sp_ in specs:

@@ -42,3 +42,10 @@ def test_admin_password_is_a_secret_field() -> None:
     from app.config import SECRET_FIELD_NAMES
 
     assert {"admin_password", "secret_key"} <= SECRET_FIELD_NAMES
+
+
+def test_incremental_max_churn_defaults_to_off_and_rejects_negatives() -> None:
+    assert Settings(rag_env="dev").incremental_max_churn is None
+    assert Settings(rag_env="dev", incremental_max_churn=0.5).incremental_max_churn == 0.5
+    with pytest.raises(ValidationError):
+        Settings(rag_env="dev", incremental_max_churn=-0.1)

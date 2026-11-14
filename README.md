@@ -126,6 +126,7 @@ Honest accounting of what has been exercised against real services versus only u
 | Documents / jobs API | real API + worker over HTTP | passed |
 | Chat (retrieval + LLM) | real OpenRouter free model, cited answers | passed |
 | Incremental update | real stack: edit 1 paragraph of a 126-chunk doc, `PUT` → **1** chunk re-embedded, 124 reused | passed |
+| Incremental update on real revisions | Fannie Mae Selling Guide ch. B3-5, Oct 8 → Nov 5 2025 (real PDFs, real OCR): `PUT` reused **173/342** chunks, embedded 169 (a rebuild embeds 342) | passed (answer check after the update not run: LLM rate-limited) |
 | Dashboard | real Chromium driving upload → live job → chat → delete | passed |
 | Langfuse tracing | traces read back from a real Langfuse project | passed |
 | **Docker Compose, all services as containers** | `docker compose up --build`, requests through the containerised frontend | passed (Ollama must run on the host) |

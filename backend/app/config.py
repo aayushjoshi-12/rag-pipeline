@@ -177,6 +177,10 @@ class Settings(BaseSettings):
     data_dir: Path = Path("data")
     max_upload_size_bytes: int = 25 * 1024 * 1024
     cleanup_orphan_age_hours: float = 24.0
+    #: Optional guard for document updates: rebuild from scratch when (added + removed) chunks
+    #: exceed this share of the old chunk count. None (default) = always update incrementally,
+    #: which never embeds more than a rebuild.
+    incremental_max_churn: float | None = None
 
     # ── Persistence ──────────────────────────────────────────────────────────
     database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
@@ -252,6 +256,8 @@ class Settings(BaseSettings):
                 "AUTH_ENABLED=true outside dev (e.g. `python -c 'import secrets;"
                 "print(secrets.token_urlsafe(48))'`)."
             )
+        if self.incremental_max_churn is not None and self.incremental_max_churn < 0:
+            raise SettingsError("incremental_max_churn must be >= 0 (or unset).")
         if self.cleanup_orphan_age_hours < 0:
             raise SettingsError("cleanup_orphan_age_hours must be >= 0.")
         self._warn_langfuse()

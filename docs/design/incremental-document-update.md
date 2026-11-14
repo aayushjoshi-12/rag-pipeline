@@ -59,9 +59,12 @@ On a re-ingest of an existing document (`job_id` for the doc):
 - **Chunker fingerprint.** Store strategy + `chunk_size` + `chunk_overlap` + rolling-hash seed on
   the `Document`/`Job`. If it changes between ingests, the hash ledger is **invalid** — fall back
   to full re-chunk + diff (or full rebuild), never trust stale hashes.
-- **Full-rebuild fallback.** If `len(added) + len(removed) > ~half the doc's chunks`, skip the
-  diff and do delete-doc + re-embed. The diff machinery isn't worth it when most of the doc
-  changed.
+- **No churn-based fallback by default.** The original design fell back to delete-doc + re-embed
+  when `len(added) + len(removed) > ~half the doc's chunks`. A real revision of the Fannie Mae
+  Selling Guide (ticket 21/26) showed why that is wrong: with 365 old chunks, 169 reusable, 181 new
+  and 196 removed, the rule rebuilt all 350 chunks while incremental embeds only the 181 added. An
+  incremental update never embeds more than a rebuild, so it is the default for any amount of churn.
+  `INCREMENTAL_MAX_CHURN` (unset by default) re-enables a rebuild guard if a deployment wants one.
 - **OCR caveat.** If parse output is inherently noisy (Tesseract), chunk hashes still work (CDC is
   content-based) but *content stability* between runs is lower — normalization matters, and the
   embedding-similarity fallback (cosine vs. the old embedding, reuse if > ε) is the optional
