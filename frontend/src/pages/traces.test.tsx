@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { renderAt, resetStore, signInAs } from '../test/helpers'
-import type { DayUsage, Trace } from '../types'
+import type { DayUsage, Insights, Trace } from '../types'
 
 vi.mock('../config', () => ({ POLL_MS: 10 }))
 vi.mock('../api/client', () => ({
@@ -13,6 +13,8 @@ vi.mock('../api/client', () => ({
     listDocuments: vi.fn(),
     listTraces: vi.fn(),
     usage: vi.fn(),
+    usageInsights: vi.fn(),
+    usageCredits: vi.fn(),
   },
   ApiError: class ApiError extends Error {},
 }))
@@ -31,6 +33,7 @@ const trace = (over: Partial<Trace> = {}): Trace => ({
   prompt_tokens: 120,
   completion_tokens: 9,
   hits: 3,
+  cost_usd: null,
   error: null,
   question: null,
   meta: { top_k: 5 },
@@ -44,6 +47,32 @@ const day = (over: Partial<DayUsage> = {}): DayUsage => ({
   p95_ms: 900,
   prompt_tokens: 1000,
   completion_tokens: 200,
+  cost_usd: null,
+  unpriced_requests: 0,
+  ...over,
+})
+
+const emptyInsights = (over: Partial<Insights> = {}): Insights => ({
+  days: 14,
+  kind: null,
+  cost_usd: null,
+  priced_chats: 0,
+  unpriced_chats: 0,
+  avg_cost_per_chat: null,
+  by_model: [],
+  latency_bucket_ms: 1,
+  latency_histogram: [],
+  errors_by_reason: [],
+  heatmap: [],
+  rag_days: [],
+  hits_histogram: [],
+  top_documents: [],
+  cited_documents: 0,
+  total_documents: 0,
+  never_cited: 0,
+  reuse_days: [],
+  ingest_modes: [],
+  ingest_failures: [],
   ...over,
 })
 
@@ -54,6 +83,16 @@ beforeEach(() => {
   m.listDocuments.mockResolvedValue([])
   m.listTraces.mockResolvedValue({ items: [], total: 0 })
   m.usage.mockResolvedValue([])
+  m.usageInsights.mockResolvedValue(emptyInsights())
+  m.usageCredits.mockResolvedValue({
+    available: false,
+    reason: 'no_api_key',
+    limit: null,
+    limit_remaining: null,
+    usage: null,
+    is_free_tier: null,
+    fetched_at: null,
+  })
 })
 
 describe('permission gating', () => {
@@ -67,6 +106,8 @@ describe('permission gating', () => {
       expect(screen.queryByRole('link', { name: 'Usage' })).not.toBeInTheDocument()
       expect(m.listTraces).not.toHaveBeenCalled()
       expect(m.usage).not.toHaveBeenCalled()
+      expect(m.usageInsights).not.toHaveBeenCalled()
+      expect(m.usageCredits).not.toHaveBeenCalled()
     },
   )
   it('shows the links with the permission', async () => {
@@ -277,17 +318,29 @@ describe('Usage page', () => {
     expect(screen.getByTestId('tile-requests')).toHaveTextContent('0')
   })
 
-  it('renders both charts with legends and an accessible table view', async () => {
-    m.usage.mockResolvedValue([day()])
+  it('renders the cost tab charts with an accessible table view (default tab)', async () => {
+    m.usage.mockResolvedValue([day({ cost_usd: 0.0125, unpriced_requests: 1 })])
     renderAt('/usage')
     await screen.findByTestId('tile-requests')
-    expect(screen.getByRole('img', { name: 'Requests per day' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Cost', selected: true })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Spend per day' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Cumulative spend' })).toBeInTheDocument()
     expect(screen.getByRole('img', { name: 'LLM tokens per day' })).toBeInTheDocument()
-    expect(screen.getAllByLabelText('legend')).toHaveLength(2)
+    expect(screen.getAllByLabelText('legend')).toHaveLength(1) // only the two-series token chart
     const table = screen.getByRole('table', { name: 'usage by day', hidden: true })
     expect(within(table).getByText('2026-11-14')).toBeInTheDocument()
     expect(within(table).getByText('500 ms')).toBeInTheDocument()
     expect(within(table).getByText('900 ms')).toBeInTheDocument()
+    expect(within(table).getByText('$0.0125')).toBeInTheDocument()
+  })
+
+  it('renders the requests-per-day chart with a legend on the performance tab', async () => {
+    m.usage.mockResolvedValue([day()])
+    renderAt('/usage?tab=performance')
+    await screen.findByTestId('tile-requests')
+    expect(screen.getByRole('img', { name: 'Requests per day' })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'Latency per day' })).toBeInTheDocument()
+    expect(screen.getAllByLabelText('legend')).toHaveLength(2)
   })
 
   it('re-queries when the period or type changes', async () => {

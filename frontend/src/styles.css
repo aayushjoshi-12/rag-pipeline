@@ -46,7 +46,7 @@
   /* chart tokens: reuse these in any chart (axes, grid, tooltip, legend) */
   --viz-1: light-dark(#2a78d6, #3987e5);
   --viz-2: light-dark(#eb6834, #d95926);
-  --viz-err: #d03b3b;
+  --viz-err: light-dark(#e34948, #e66767);
   --viz-grid: light-dark(#e3e2de, #2e2e2c);
   --viz-ink: light-dark(#52514e, #c3c2b7);
   --viz-axis-ink: var(--viz-ink);
@@ -1686,7 +1686,7 @@ input.switch:checked::after {
 }
 .chart-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 34rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 26rem), 1fr));
   gap: var(--s-4);
   margin-top: var(--s-3);
 }
@@ -1884,4 +1884,190 @@ input.switch:checked::after {
 }
 .meta-chips .chip-static {
   gap: 0.3rem;
+}
+
+/* ───────────── Usage page (ticket 32): d3 charts, tabs, budget bar, heatmap ─────────────
+   Sequential single-hue ramp for the heatmap (blue 100 -> 600 on light; dark surface -> 300). */
+:root {
+  --viz-seq-lo: light-dark(#cde2fb, #1d3a5f);
+  --viz-seq-hi: light-dark(#184f95, #6da7ec);
+  --viz-heat-empty: light-dark(#f1f1f3, #1d1d21);
+}
+.tabs {
+  display: flex;
+  gap: var(--s-1);
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: none;
+}
+.tab {
+  flex: none;
+  padding: var(--s-2) var(--s-3);
+  margin-bottom: -1px;
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover {
+  color: var(--ink);
+}
+.tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+.tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--r);
+}
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  min-width: 0;
+}
+.tab-panel > .chart-grid {
+  margin-top: 0;
+}
+.chart-title {
+  color: var(--ink);
+}
+.chart-card .viz-wrap svg {
+  display: block;
+  max-width: 100%;
+  overflow: visible;
+}
+.chart-card .viz-wrap {
+  min-width: 0;
+}
+.viz-line path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+.viz-area {
+  opacity: 0.12;
+}
+.viz-crosshair line {
+  stroke: var(--viz-axis-ink);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+.viz-dot {
+  stroke: var(--surface);
+  stroke-width: 2;
+}
+.viz-cell.is-active rect:first-child {
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+.heat-scale {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  margin-top: var(--s-2);
+  color: var(--viz-axis-ink);
+  font-size: 0.75rem;
+}
+.heat-ramp {
+  width: 7rem;
+  height: 8px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--viz-seq-lo), var(--viz-seq-hi));
+}
+.viz-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.viz-tip-row strong:empty {
+  display: none;
+}
+.hbars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin: var(--s-2) 0 var(--s-2);
+  padding: 0;
+  list-style: none;
+}
+.hbar-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--s-3);
+  font-size: 0.8125rem;
+}
+.hbar-label {
+  min-width: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.hbar-value {
+  flex: none;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.hbar-track {
+  height: 8px;
+  margin-top: 0.3rem;
+  border-radius: 4px;
+  background: var(--viz-heat-empty);
+}
+.hbar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+.hbar-sub {
+  margin-top: 0.2rem;
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+.budget-figures {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s-1) var(--s-4);
+  font-size: 1.25rem;
+}
+.budget-figures .muted {
+  font-size: 0.8125rem;
+}
+.budget-meter {
+  height: 10px;
+}
+.budget-forecast {
+  margin: var(--s-2) 0 0;
+  color: var(--ink-2);
+  font-size: 0.875rem;
+}
+.table-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  padding: var(--s-3);
+}
+.table-stack .table-wrap {
+  max-height: 18rem;
+}
+@media (max-width: 640px) {
+  /* the old rule enlarged SVG text because the chart was scaled down; charts are now drawn at real size */
+  .viz-tick {
+    font-size: 11px;
+  }
+}
+/* ───────────── end ticket 32 ───────────── */
+@media (max-width: 640px) {
+  /* ticket 32: an odd last KPI tile (the spend tile) takes the full row instead of wrapping its value */
+  .kpi-grid > .kpi:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
 }

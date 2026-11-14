@@ -2,10 +2,12 @@ import type {
   ChatRequest,
   ChatResponse,
   Chunk,
+  Credits,
   DayUsage,
   Document,
   DocumentDetail,
   HealthResponse,
+  Insights,
   Job,
   ManagedUser,
   Me,
@@ -134,6 +136,9 @@ export const api = {
   getTrace: (id: string) => request<Trace>(`/traces/${id}`),
   usage: (days = 14, kind = '') =>
     request<DayUsage[]>(`/usage?days=${days}${kind ? `&kind=${kind}` : ''}`),
+  usageInsights: (days = 14, kind = '') =>
+    request<Insights>(`/usage/insights?days=${days}${kind ? `&kind=${kind}` : ''}`),
+  usageCredits: () => request<Credits>('/usage/credits'),
   listPermissions: () => request<PermissionInfo[]>('/permissions'),
   listUsers: () => request<ManagedUser[]>('/users'),
   createUser: (input: UserCreateInput) =>

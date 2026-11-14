@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useRef, type KeyboardEvent, type ReactNode } from 'react'
 import { Icon, type IconName } from './Icon'
 
 /** Page title row: h1, one-line description, primary action(s) on the right. */
@@ -162,5 +162,73 @@ export function ChartCard({
       {legend}
       {children}
     </figure>
+  )
+}
+
+export interface TabDef {
+  id: string
+  label: string
+}
+
+/**
+ * Accessible tabs (WAI-ARIA tablist): one Tab stop, Left/Right/Home/End move and activate.
+ * The caller renders the active panel inside `<TabPanel>` so only one panel is in the DOM.
+ */
+export function Tabs({
+  tabs,
+  value,
+  onChange,
+  label,
+}: {
+  tabs: TabDef[]
+  value: string
+  onChange: (id: string) => void
+  label: string
+}) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([])
+  const go = (i: number) => {
+    const t = tabs[(i + tabs.length) % tabs.length]
+    if (!t) return
+    onChange(t.id)
+    refs.current[(i + tabs.length) % tabs.length]?.focus()
+  }
+  const onKeyDown = (i: number) => (e: KeyboardEvent) => {
+    if (e.key === 'ArrowRight') go(i + 1)
+    else if (e.key === 'ArrowLeft') go(i - 1)
+    else if (e.key === 'Home') go(0)
+    else if (e.key === 'End') go(tabs.length - 1)
+    else return
+    e.preventDefault()
+  }
+  return (
+    <div className="tabs" role="tablist" aria-label={label}>
+      {tabs.map((t, i) => (
+        <button
+          key={t.id}
+          ref={(el) => {
+            refs.current[i] = el
+          }}
+          type="button"
+          role="tab"
+          id={`tab-${t.id}`}
+          aria-selected={t.id === value}
+          aria-controls={`panel-${t.id}`}
+          tabIndex={t.id === value ? 0 : -1}
+          className={t.id === value ? 'tab is-active' : 'tab'}
+          onClick={() => onChange(t.id)}
+          onKeyDown={onKeyDown(i)}
+        >
+          {t.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+export function TabPanel({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <div role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`} className="tab-panel">
+      {children}
+    </div>
   )
 }

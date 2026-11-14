@@ -172,6 +172,7 @@ export interface Trace {
   prompt_tokens: number | null
   completion_tokens: number | null
   hits: number | null
+  cost_usd: number | null
   error: string | null
   question: string | null
   meta: Record<string, unknown>
@@ -190,4 +191,70 @@ export interface DayUsage {
   p95_ms: number | null
   prompt_tokens: number
   completion_tokens: number
+  /** Sum of the known costs of the day; null = none known (not 0). */
+  cost_usd: number | null
+  /** Successful chat requests of the day whose cost is unknown. */
+  unpriced_requests: number
+}
+
+export interface ModelCost {
+  model: string | null
+  requests: number
+  prompt_tokens: number
+  completion_tokens: number
+  cost_usd: number | null
+  unpriced_requests: number
+}
+export interface Bucket {
+  lo: number
+  hi: number
+  count: number
+}
+export interface Reason {
+  reason: string
+  count: number
+}
+export interface HeatCell {
+  /** 0 = Monday ... 6 = Sunday (UTC) */
+  weekday: number
+  hour: number
+  count: number
+}
+export interface CitedDocument {
+  document_id: string
+  filename: string | null
+  citations: number
+}
+
+export interface Insights {
+  days: number
+  kind: string | null
+  cost_usd: number | null
+  priced_chats: number
+  unpriced_chats: number
+  avg_cost_per_chat: number | null
+  by_model: ModelCost[]
+  latency_bucket_ms: number
+  latency_histogram: Bucket[]
+  errors_by_reason: Reason[]
+  heatmap: HeatCell[]
+  rag_days: { day: string; queries: number; no_hit: number }[]
+  hits_histogram: { hits: number; count: number }[]
+  top_documents: CitedDocument[]
+  cited_documents: number
+  total_documents: number
+  never_cited: number
+  reuse_days: { day: string; ingests: number; reused: number; embedded: number }[]
+  ingest_modes: { mode: string; runs: number; avg_ms: number; p95_ms: number }[]
+  ingest_failures: Reason[]
+}
+
+export interface Credits {
+  available: boolean
+  reason: 'provider_not_openrouter' | 'no_api_key' | 'unavailable' | null
+  limit: number | null
+  limit_remaining: number | null
+  usage: number | null
+  is_free_tier: boolean | null
+  fetched_at: number | null
 }
