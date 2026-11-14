@@ -117,9 +117,60 @@ describe('Traces page', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('LLM provider returned 429')
     expect(screen.getByText('why?')).toBeInTheDocument()
+    // known settings are chips; the raw JSON sits behind the Raw toggle
+    expect(screen.queryByText('{"top_k":5}')).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Raw' }))
     expect(screen.getByText('{"top_k":5}')).toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: 'details t2' }))
     expect(screen.queryByText('why?')).not.toBeInTheDocument()
+  })
+
+  it('shows retrieval settings as chips with the raw JSON behind a toggle', async () => {
+    const meta = {
+      mode: 'hybrid',
+      keyword_method: 'bm25',
+      fusion: 'rrf',
+      candidates: 50,
+      top_k: 5,
+      neighbors: 1,
+      extra: { a: 1 },
+    }
+    m.listTraces.mockResolvedValue({ items: [trace({ id: 't9', meta })], total: 1 })
+    renderAt('/traces')
+    await userEvent.click(await screen.findByRole('button', { name: 'details t9' }))
+    const chips = within(screen.getByRole('list', { name: 'retrieval settings' }))
+    for (const [k, v] of [
+      ['mode', 'hybrid'],
+      ['fusion', 'rrf'],
+      ['keyword method', 'bm25'],
+      ['candidates', '50'],
+      ['top_k', '5'],
+      ['neighbors', '1'],
+    ] as const) {
+      const item = chips.getByText(k).closest('li')!
+      expect(item).toHaveTextContent(`${k} ${v}`)
+    }
+    expect(chips.getAllByRole('listitem')).toHaveLength(6) // objects are not chips
+    expect(screen.queryByText(JSON.stringify(meta))).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Raw' }))
+    expect(screen.getByText(JSON.stringify(meta))).toBeInTheDocument()
+  })
+
+  it('omits chips for settings that are absent (semantic trace without fusion)', async () => {
+    m.listTraces.mockResolvedValue({
+      items: [
+        trace({
+          id: 't8',
+          meta: { mode: 'semantic', fusion: null, top_k: 5, candidates: { n: 1 } },
+        }),
+      ],
+      total: 1,
+    })
+    renderAt('/traces')
+    await userEvent.click(await screen.findByRole('button', { name: 'details t8' }))
+    const chips = within(screen.getByRole('list', { name: 'retrieval settings' }))
+    expect(chips.getAllByRole('listitem')).toHaveLength(2)
+    expect(chips.queryByText('fusion')).not.toBeInTheDocument()
   })
 
   it('filters by type and status and resets to the first page', async () => {

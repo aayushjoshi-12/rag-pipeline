@@ -45,6 +45,18 @@ describe('api client', () => {
     expect((init.headers as Headers).has('Content-Type')).toBe(false)
   })
 
+  it('turns a FastAPI 422 detail list into one readable message', async () => {
+    mockFetch(422, {
+      detail: [
+        { type: 'literal_error', loc: ['body', 'mode'], msg: "Input should be 'semantic'" },
+        { loc: ['body', 'fusion'], msg: "Input should be 'rrf'" },
+      ],
+    })
+    await expect(api.chat({ question: 'q' })).rejects.toThrow(
+      "mode: Input should be 'semantic'; fusion: Input should be 'rrf'",
+    )
+  })
+
   it('maps error responses to ApiError with the backend detail', async () => {
     mockFetch(413, { detail: 'File exceeds the limit.' })
     await expect(api.upload(new File(['x'], 'a.txt'))).rejects.toMatchObject({

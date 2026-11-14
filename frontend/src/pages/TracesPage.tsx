@@ -5,6 +5,50 @@ import { Alert, Card, EmptyState, PageHeader } from '../components/ui'
 import type { Trace } from '../types'
 
 const PAGE = 25
+const META_CHIPS: [key: string, label: string][] = [
+  ['mode', 'mode'],
+  ['fusion', 'fusion'],
+  ['keyword_method', 'keyword method'],
+  ['candidates', 'candidates'],
+  ['top_k', 'top_k'],
+  ['neighbors', 'neighbors'],
+]
+
+/** Known retrieval settings as readable chips; anything else stays reachable via "Raw". */
+function MetaDetails({ meta }: { meta: Record<string, unknown> }) {
+  const [raw, setRaw] = useState(false)
+  const chips = META_CHIPS.filter(([k]) => {
+    const v = meta[k]
+    return v !== undefined && v !== null && typeof v !== 'object'
+  })
+  return (
+    <>
+      {chips.length > 0 && (
+        <ul className="meta-chips" aria-label="retrieval settings">
+          {chips.map(([k, label]) => (
+            <li key={k} className="chip chip-static">
+              <span className="muted">{label}</span> <strong>{String(meta[k])}</strong>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        className="linklike small"
+        aria-pressed={raw}
+        onClick={() => setRaw((v) => !v)}
+      >
+        Raw
+      </button>
+      {(raw || chips.length === 0) && (
+        <div>
+          <code>{JSON.stringify(meta)}</code>
+        </div>
+      )}
+    </>
+  )
+}
+
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 export default function TracesPage() {
@@ -160,7 +204,7 @@ export default function TracesPage() {
                             )}
                             <dt>Details</dt>
                             <dd>
-                              <code>{JSON.stringify(t.meta)}</code>
+                              <MetaDetails meta={t.meta} />
                             </dd>
                           </dl>
                         </td>

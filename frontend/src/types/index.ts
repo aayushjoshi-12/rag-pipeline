@@ -49,11 +49,21 @@ export interface Chunk {
   metadata: Record<string, unknown>
 }
 
+export type RetrievalMode = 'semantic' | 'keyword' | 'hybrid'
+export type RetrievalFusion = 'rrf' | 'weighted'
+
 export interface ChatRequest {
   question: string
   document_ids?: string[]
   top_k?: number
+  /** Per-request override; omit to use the server default. */
+  mode?: RetrievalMode
+  /** Per-request override, only meaningful for hybrid; omit to use the server default. */
+  fusion?: RetrievalFusion
 }
+
+/** What `score` means: `distance` is lower-is-closer, every other kind is higher-is-better. */
+export type ScoreKind = 'distance' | 'bm25' | 'ts_rank_cd' | 'rrf' | 'weighted'
 
 export interface Source {
   text: string
@@ -61,6 +71,11 @@ export interface Source {
   chunk_index: number
   filename: string
   score: number
+  /** Absent on older servers (then `score` is a distance). Scores are not comparable across kinds. */
+  score_kind?: ScoreKind | (string & {})
+  /** Hybrid only: 1-based rank in the semantic / keyword candidate list, null when absent there. */
+  semantic_rank?: number | null
+  keyword_rank?: number | null
   /** False for neighbouring context chunks (absent on older servers: treat as a hit). */
   is_hit?: boolean
 }

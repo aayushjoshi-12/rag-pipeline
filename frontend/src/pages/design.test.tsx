@@ -53,7 +53,7 @@ describe('chat conversation layout', () => {
     expect(items).toHaveLength(2)
     expect(within(items[0]!).queryByText('context')).not.toBeInTheDocument()
     expect(within(items[1]!).getByText('context')).toBeInTheDocument()
-    expect(within(items[0]!).getByText('score 0.50')).toBeInTheDocument()
+    expect(within(items[0]!).getByText('distance 0.50')).toBeInTheDocument()
   })
 
   it('shows the question as a user message and says when nothing relevant was found', async () => {

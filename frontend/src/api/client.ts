@@ -32,12 +32,25 @@ export class ApiError extends Error {
   }
 }
 
+/** FastAPI 422 detail (a list of {loc, msg}) as one readable line, or null if it isn't that shape. */
+function validationMessage(detail: unknown): string | null {
+  if (!Array.isArray(detail) || detail.length === 0) return null
+  const parts = detail.map((d: unknown) => {
+    if (!d || typeof d !== 'object' || !('msg' in d) || typeof d.msg !== 'string') return null
+    const loc =
+      'loc' in d && Array.isArray(d.loc) ? d.loc.filter((x) => x !== 'body').join('.') : ''
+    return loc ? `${loc}: ${d.msg}` : d.msg
+  })
+  return parts.every((p) => p !== null) ? parts.join('; ') : null
+}
+
 async function errorMessage(res: Response): Promise<string> {
   try {
     const body: unknown = await res.json()
     if (body && typeof body === 'object' && 'detail' in body) {
       const detail = (body as { detail: unknown }).detail
-      return typeof detail === 'string' ? detail : JSON.stringify(detail)
+      if (typeof detail === 'string') return detail
+      return validationMessage(detail) ?? JSON.stringify(detail)
     }
   } catch {
     /* non-JSON error body */

@@ -1835,3 +1835,53 @@ input.switch:checked::after {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Retrieval options (chat composer) and trace meta chips */
+.retrieval {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.retrieval-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  align-self: flex-start;
+}
+.retrieval-chevron {
+  transition: transform 0.15s;
+}
+.retrieval-toggle[aria-expanded='true'] .retrieval-chevron {
+  transform: rotate(90deg);
+}
+.retrieval-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--s-3) var(--s-4);
+  padding: var(--s-3);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+}
+.retrieval-panel .select {
+  width: 100%;
+}
+.field-help {
+  margin: 0;
+  color: var(--ink-3);
+  font-size: 0.75rem;
+}
+.source-head {
+  flex-wrap: wrap;
+}
+.meta-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+  margin: 0 0 var(--s-2);
+  padding: 0;
+  list-style: none;
+}
+.meta-chips .chip-static {
+  gap: 0.3rem;
+}

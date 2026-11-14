@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../api/client'
-import type { ChatResponse, Document, Job } from '../types'
+import type { ChatRequest, ChatResponse, Document, Job } from '../types'
 
 interface AppState {
   documents: Document[]
@@ -12,7 +12,11 @@ interface AppState {
   trackJob: (job: Job) => void
   pollJob: (jobId: string) => Promise<Job>
   removeDocument: (id: string) => Promise<void>
-  ask: (question: string, documentIds?: string[]) => Promise<void>
+  ask: (
+    question: string,
+    documentIds?: string[],
+    retrieval?: Pick<ChatRequest, 'mode' | 'fusion'>,
+  ) => Promise<void>
 }
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -46,12 +50,13 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ documents: s.documents.filter((d) => d.id !== id) }))
   },
 
-  ask: async (question, documentIds) => {
+  ask: async (question, documentIds, retrieval) => {
     set({ chat: { question, response: null, pending: true, error: null } })
     try {
       const response = await api.chat({
         question,
         ...(documentIds && documentIds.length > 0 ? { document_ids: documentIds } : {}),
+        ...retrieval,
       })
       set({ chat: { question, response, pending: false, error: null } })
     } catch (e) {

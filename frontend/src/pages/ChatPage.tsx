@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../components/Icon'
+import { RetrievalOptions } from '../components/RetrievalOptions'
 import { Alert, EmptyState, PageHeader } from '../components/ui'
+import {
+  loadPrefs,
+  requestOverrides,
+  savePrefs,
+  scoreLabel,
+  type RetrievalPrefs,
+} from '../retrieval'
 import { useStore } from '../store'
 import type { Source } from '../types'
 
@@ -8,6 +16,7 @@ function SourceCard({ source, n }: { source: Source; n: number }) {
   const [open, setOpen] = useState(false)
   const long = source.text.length > 240
   const context = source.is_hit === false
+  const label = scoreLabel(source)
   return (
     <li className={context ? 'source is-context' : 'source'}>
       <span className="source-n" aria-hidden="true">
@@ -18,9 +27,22 @@ function SourceCard({ source, n }: { source: Source; n: number }) {
           <strong className="truncate" title={source.filename}>
             {source.filename} · chunk {source.chunk_index}
           </strong>
-          <span className="chip chip-static num" title="Similarity score">
-            score {source.score.toFixed(2)}
+          <span className="chip chip-static num" title={label.title}>
+            {label.text}
           </span>
+          {source.semantic_rank != null && (
+            <span className="chip chip-static num" title="Rank in the semantic (meaning) results">
+              semantic #{source.semantic_rank}
+            </span>
+          )}
+          {source.keyword_rank != null && (
+            <span
+              className="chip chip-static num"
+              title="Rank in the keyword (exact words) results"
+            >
+              keyword #{source.keyword_rank}
+            </span>
+          )}
           {context && (
             <span className="chip chip-static" title="Neighbouring chunk added for context">
               context
@@ -47,6 +69,11 @@ export default function ChatPage() {
   const { documents, refreshDocuments, chat, ask } = useStore()
   const [question, setQuestion] = useState('')
   const [selected, setSelected] = useState<string[]>([])
+  const [prefs, setPrefs] = useState<RetrievalPrefs>(loadPrefs)
+  const changePrefs = (next: RetrievalPrefs) => {
+    setPrefs(next)
+    savePrefs(next)
+  }
 
   useEffect(() => {
     void refreshDocuments()
@@ -57,7 +84,7 @@ export default function ChatPage() {
     setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
   const submit = () => {
     if (question.trim() && !chat.pending) {
-      void ask(question.trim(), selected)
+      void ask(question.trim(), selected, requestOverrides(prefs))
       setQuestion('')
     }
   }
@@ -163,6 +190,7 @@ export default function ChatPage() {
             ))}
           </div>
         </fieldset>
+        <RetrievalOptions value={prefs} onChange={changePrefs} />
         <div className="composer-row">
           <label className="sr-only" htmlFor="chat-question">
             Question
