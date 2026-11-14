@@ -17,6 +17,7 @@ from app.services.langfuse import configure_from_settings
 from app.services.parse_errors import DocumentLoadError, UnsupportedFileTypeError
 from app.services.pdf_pages import PdfPageRenderer, extract_native_texts, render_pages
 from app.services.retry import with_retry
+from app.services.textnorm import normalise_text
 
 logger = logging.getLogger(__name__)
 
@@ -55,16 +56,27 @@ def parse(
     normalized = filetype.lower().lstrip(".")
 
     if normalized == "pdf":
-        return _parse_pdf(path, cfg, provider, backend)
-    if normalized == "docx":
-        return _parse_docx(path, cfg)
+        result = _parse_pdf(path, cfg, provider, backend)
+    elif normalized == "docx":
+        result = _parse_docx(path, cfg)
+    elif normalized in ("txt", "md"):
+        result = _parse_text(path, normalized)
+    else:
+        raise UnsupportedFileTypeError(
+            f"Unsupported file type '{filetype}'. Supported: {', '.join(_SUPPORTED_FILETYPES)}."
+        )
+    return _normalised(result) if cfg.parse_normalize_text else result
 
-    if normalized in ("txt", "md"):
-        return _parse_text(path, normalized)
 
-    raise UnsupportedFileTypeError(
-        f"Unsupported file type '{filetype}'. Supported: {', '.join(_SUPPORTED_FILETYPES)}."
-    )
+def _normalised(result: ParseResult) -> ParseResult:
+    """Fold ligatures / odd spaces / curly quotes (``services/textnorm.py``) in every text of ``result``.
+
+    Done once, here at the seam, so the chunker, the embedder and the keyword index all see the same
+    characters a user would type. Folding per page and joining gives the same text as folding the whole
+    (the page separator is ASCII)."""
+    result.page_texts = [normalise_text(t) for t in result.page_texts]
+    result.text = normalise_text(result.text)
+    return result
 
 
 def _parse_pdf(

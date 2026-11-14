@@ -39,6 +39,7 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
 | `IVFFLAT_PROBES` | integer `1..IVFFLAT_LISTS` | `10` | query-time | Clusters searched per query (latency vs recall). `= IVFFLAT_LISTS` is an exact search. |
 | `EMBEDDING_DIMENSION` | integer | unset = known model table, else one probe call | reindex | Vector length for the pgvector column (never hard-coded). Known: mxbai-embed-large 1024, nomic-embed-text 768, text-embedding-3-small 1536, ... Set it for any other model so no embedding call is needed at startup. |
 | `CHROMA_COLLECTION` | string | `documents` | deployment | Collection holding the vectors, so several deployments can share one Chroma server. |
+| `PARSE_NORMALIZE_TEXT` | `true`, `false` | `true` | index-time | Fold PDF/Word/text extraction quirks before chunking: Latin ligatures (`ﬁ ﬂ ﬀ ﬃ ﬄ` -> `fi fl ff ffi ffl`), no-break/thin/ideographic spaces -> space, soft hyphen and zero-width characters removed, curly quotes -> `'` `"`, canonical (NFC) composition. Deliberately **not** NFKC: superscripts, fractions, `™`, full-width forms, CJK and dashes are left as extracted. See [Text normalisation](#text-normalisation). |
 | `STORAGE_BACKEND` | `local`, `s3` | `local` | deployment (per document: `documents.storage_backend`) | Where uploaded / downloaded source files are kept. `local` = `DATA_DIR/uploads/<id>/<name>`. `s3` = any S3-compatible store through boto3. Existing documents stay where they were written. See [File storage and URL ingest](#file-storage-and-url-ingest). |
 | `S3_ENDPOINT_URL` | http(s) URL or empty | empty (= AWS) | deployment | Endpoint of an S3-compatible store (MinIO: `http://minio:9000`). Path-style addressing is used when set. |
 | `S3_BUCKET` | string | empty | deployment | Bucket for `STORAGE_BACKEND=s3` (required then) and the default bucket `s3://` links may read. |
@@ -266,3 +267,26 @@ failed, wrong file type, too large) appear on the job: `status: "failed"`, `erro
 * **`s3://bucket/key`**: read with the server's S3 credentials/endpoint, only from `URL_INGEST_S3_BUCKETS` (default
   `S3_BUCKET`), size-capped like an HTTP download, and **copied** into the configured storage so the document owns its
   copy (deleting the document never touches the source object).
+
+## Text normalisation
+
+Born-digital PDFs store typographic ligatures as single characters: the Selling Guide text layer says `conﬁrm`
+(U+FB01), so a BM25 / full-text query `confirm` never matches that chunk and the embedder sees a different token.
+`PARSE_NORMALIZE_TEXT=true` (default) folds this in the parse seam (`app/services/parser.py` -> `app/services/textnorm.py`),
+after extraction and before chunking, for every file type.
+
+**Decision: a targeted map + NFC, not NFKC.** NFKC fixes the ligatures but also rewrites characters whose meaning matters:
+`m²` -> `m2`, footnote `word¹` -> `word1`, `½` -> `1⁄2` (digit + U+2044, which nobody types), `™` -> `TM`, `№` -> `No`,
+`…` -> `...`, the micro sign `µ` -> Greek `μ`, `㎏` -> `kg`, `①` -> `1`, `Ⅳ` -> `IV`, and full-width/half-width forms
+(`Ａ１`, `ｱ`) -> other characters, i.e. it edits the text of CJK documents. It also does not touch curly quotes or no-break
+spaces, which hurt matching too. The map folds only: Latin ligatures U+FB00..FB06; no-break / narrow no-break / thin / hair /
+figure / ideographic spaces -> one space; soft hyphen and zero-width space/joiner/non-joiner/word joiner/BOM -> removed;
+`‘ ’ ‚ ‛ ′` -> `'` and `“ ” „ ‟` -> `"`; then NFC (lossless canonical composition, `e` + combining acute -> `é`).
+Test data for what must not change is in `tests/unit/test_textnorm.py`.
+
+**Upgrading.** The chunker fingerprint is unchanged (the chunking *algorithm* is the same), so nothing is forced: existing
+documents keep their old chunks (with ligatures) until they are ingested again. Re-ingest to apply it: `PUT /documents/{id}`
+with the same file, or re-run the job. That re-ingest is **incremental**: only the chunks whose text contained a folded
+character get new content hashes and are re-embedded; unchanged chunks are kept (a test pins this). `python -m app.manage reindex`
+rebuilds the *vector store* from the stored chunk text and therefore does **not** remove ligatures that are already in it.
+Set `PARSE_NORMALIZE_TEXT=false` to keep the text exactly as extracted (index-time: affects documents ingested afterwards).

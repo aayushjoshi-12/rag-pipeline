@@ -42,6 +42,7 @@ data:
   RETRIEVAL_FTS_CONFIG: "english"
   RETRIEVAL_DEDUPE: "true"
   MAX_UPLOAD_SIZE_BYTES: "26214400"
+  PARSE_NORMALIZE_TEXT: "true"
   # File storage + ingest from links (docs/configuration.md). STORAGE_BACKEND=s3 removes the need for a
   # ReadWriteMany uploads volume when the api and worker run several replicas; credentials: secrets.yaml.
   STORAGE_BACKEND: "local"

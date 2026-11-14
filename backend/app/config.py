@@ -315,6 +315,9 @@ class Settings(BaseSettings):
     ocr_lang: str = "eng"
     tesseract_cmd: str | None = None
     docx_reader: str = "docling"
+    #: Fold PDF ligatures (ﬁ -> fi), odd spaces, soft hyphens and curly quotes in extracted text before
+    #: chunking (ticket 33, services/textnorm.py). Index-time: applies to documents ingested afterwards.
+    parse_normalize_text: bool = True
 
     # ── Observability ────────────────────────────────────────────────────────
     langfuse_public_key: str = ""
