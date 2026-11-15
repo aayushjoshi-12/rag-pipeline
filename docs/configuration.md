@@ -1,7 +1,9 @@
 # Configuration reference
 
-Settings are layered: environment variables > `config/config.<RAG_ENV>.json` > defaults
-(`backend/app/config.py`). Every choice is a flat key with a validated range; an invalid value
+Settings are layered (highest wins): **environment variables (including a `.env` file) > the admin
+Settings window (database) > `config/config.<RAG_ENV>.json` > built-in defaults**
+(`backend/app/config.py`, [ADR-0008](adr/0008-runtime-settings.md)). See
+[The Settings window](#the-settings-window-admin-ui) for the UI layer. Every choice is a flat key with a validated range; an invalid value
 fails at startup with the allowed values. **Scope** says when a change takes effect:
 
 - *query-time* — applies to the next request; may also be overridden per request.
@@ -55,6 +57,54 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
 | `URL_INGEST_MAX_BYTES` | integer `>= 1` or unset | unset = `MAX_UPLOAD_SIZE_BYTES` | deployment | Download size cap, enforced on the bytes actually received. |
 
 Why these defaults: see "Parameter choice" in `docs/adr/0003-chunking.md`.
+
+## The Settings window (admin UI)
+
+Admin > **Settings** (permissions `settings:read` to view, `settings:manage` to change) edits almost every
+setting without touching files. It adds one layer between the environment and the config file:
+
+| Layer (highest first) | Where it lives | Who changes it |
+|---|---|---|
+| 1. environment variable / `.env` | process environment, K8s Secret/ConfigMap | operator |
+| 2. **UI (database)** | `app_settings` table | admin, in the Settings window |
+| 3. `config/config.<RAG_ENV>.json` | image | developer |
+| 4. built-in default | code | developer |
+
+- A setting pinned by layer 1 is shown **locked** with the reason (`set by environment variable X`) and
+  cannot be edited; a UI value stored earlier is kept but ignored (shown as "shadowed"). **To manage a
+  setting from the UI, remove it from the environment.** Note that Compose passes everything in `.env`
+  and several keys in `docker-compose.yml` (e.g. `S3_*`, `STORAGE_BACKEND`, `PARSE_NORMALIZE_TEXT`) into the
+  containers, and that an *empty* variable still counts as set: delete the line to unpin the key.
+- Each setting says when a change applies: **live** (next request / next Celery task, no restart),
+  **needs restart** (stored now, used after the API restarts: `CORS_ALLOW_ORIGINS`, `LOG_LEVEL`,
+  `LANGFUSE_*`), **needs reindex** (embedding provider/model/dimension, vector store/host/collection,
+  metric, index type, HNSW M/ef_construction, IVFFlat lists, FTS configuration: the page asks for a
+  confirmation, applies the value and queues the reindex; progress is shown), or **read-only**
+  (bootstrap values such as `DATABASE_URL`, `CELERY_*`, `SECRET_KEY`, `AUTH_ENABLED`,
+  `URL_INGEST_ALLOW_PRIVATE`, `TESSERACT_CMD`, `DATA_DIR`, which must exist before the database can be read or are too
+  dangerous to change from a web page).
+- `CHUNK_SIZE`/`CHUNK_OVERLAP`/`PARSE_NORMALIZE_TEXT` are live but apply to documents ingested afterwards
+  (re-upload to re-chunk); a reindex re-embeds the stored chunk text, it does not re-chunk.
+- **Services** at the top guide a provider switch (chat model, embeddings, vector store, file storage,
+  parser): the fields that belong together, the consequence, and **Test connection** (key/models check,
+  one tiny embedding, heartbeat, head-bucket; the saved settings are tested, never a secret returned).
+- **Secrets are write-only.** API keys etc. are stored encrypted (Fernet, key derived from
+  `SETTINGS_ENCRYPTION_KEY`), never returned by any endpoint or shown again (only "set" / "not set" and who
+  changed it), and can be replaced or cleared. Without `SETTINGS_ENCRYPTION_KEY` (a random string of 32+
+  characters in the server environment) secret fields are disabled and everything else still works.
+  Rotation: put the new key in `SETTINGS_ENCRYPTION_KEY`, keep the old one in
+  `SETTINGS_ENCRYPTION_KEY_PREVIOUS`, run `python -m app.manage rotate-settings-key`, then drop the old one.
+- Replicas and workers read the layer from the database: the API re-reads it every
+  `SETTINGS_REFRESH_SECONDS` (default 5) and right after its own writes; a Celery task reads it when it
+  starts. If the stored values ever form an invalid combination they are not applied (the last good values
+  stay) and the page says so.
+- Every change is recorded in the audit log (who, when, old/new value; **never a secret value**).
+
+| Key | Values | Default | Meaning |
+|---|---|---|---|
+| `SETTINGS_ENCRYPTION_KEY` | string, >= 32 chars | empty | Encrypts secrets stored from the UI (env / K8s Secret only). |
+| `SETTINGS_ENCRYPTION_KEY_PREVIOUS` | comma separated strings | empty | Old key(s) still accepted for decryption while rotating. |
+| `SETTINGS_REFRESH_SECONDS` | float `0.5..3600` | `5` | How often each process re-reads the UI layer. |
 
 ## Vector store and index options
 

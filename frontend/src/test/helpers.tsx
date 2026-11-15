@@ -37,6 +37,8 @@ export const ALL_PERMISSIONS = [
   'users:manage',
   'roles:manage',
   'apikeys:manage',
+  'settings:read',
+  'settings:manage',
 ]
 
 /** Signed in as ``email`` holding ``permissions`` (default: everything). */

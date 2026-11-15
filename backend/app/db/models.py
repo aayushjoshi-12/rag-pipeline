@@ -221,3 +221,42 @@ class ApiKey(Base):
 
     owner: Mapped[User] = relationship(lazy="joined")
     role: Mapped[Role] = relationship(lazy="joined")
+
+
+class AppSetting(Base):
+    """One admin-UI override of a ``Settings`` field (migration 0010; ADR-0008).
+
+    Non-secret values live in ``value`` (JSON); secrets live only as a Fernet token in ``secret_blob``.
+    Deleting the row returns the setting to config.json / the built-in default.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    secret_blob: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_secret: Mapped[bool] = mapped_column(Boolean, default=False)
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+    updated_by: Mapped[str] = mapped_column(String(320), default="")
+
+
+class SettingsAudit(Base):
+    """Who changed which setting. Secret values are NEVER stored: ``secret`` rows carry no old/new value."""
+
+    __tablename__ = "settings_audit"
+    __table_args__ = (
+        Index("ix_settings_audit_at", "at"),
+        Index("ix_settings_audit_key_at", "key", "at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+    actor: Mapped[str] = mapped_column(String(320))
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    #: set | reset | set_secret | clear_secret | reindex_queued
+    action: Mapped[str] = mapped_column(String(24))
+    key: Mapped[str] = mapped_column(String(64))
+    old_value: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    new_value: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    secret: Mapped[bool] = mapped_column(Boolean, default=False)
+    detail: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)

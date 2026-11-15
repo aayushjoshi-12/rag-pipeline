@@ -7,7 +7,7 @@
 | [configuration.md](configuration.md) | Every setting, defaults, scope (deployment vs per-request), tuning notes | yes |
 | [performance.md](performance.md) | Query-cache benchmark: method, numbers, caveats, how to quote them | yes (numbers come from the JSON below) |
 | [kubernetes-local.md](kubernetes-local.md) | Running the manifests on kind | yes |
-| [adr/](adr/) | Decisions and rejected alternatives: stack, parsing, chunking | append-only |
+| [adr/](adr/) | Decisions and rejected alternatives: stack, parsing, chunking, cache, API keys, runtime settings | append-only |
 | [design/](design/) | Working notes: incremental update, evals brainstorm | yes |
 
 ## The JSON files (generated, not prose)

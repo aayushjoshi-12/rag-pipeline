@@ -211,7 +211,16 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 
 ## Config loading (dev vs prod)
 
-Config is three-layered (highest wins): env vars → `config/config.<env>.json` → defaults.
+Config is four-layered (highest wins): **env vars (incl. `.env`) → admin UI (database, `app_settings`) →
+`config/config.<env>.json` → defaults** (ticket 43, ADR-0008). The UI layer is a pydantic-settings source
+(`DbOverridesSource`) fed by an in-memory snapshot that `app/services/runtime_settings.py` loads from the DB
+(API: lazily every `SETTINGS_REFRESH_SECONDS` and after its own writes; Celery: at task start), so any
+`Settings()` already includes it. Never capture `Settings()` at import time for a UI-editable key; build it per
+use. A setting pinned by an env var is shown locked in the UI; to manage it from the UI, unset the variable.
+The registry (`app/services/settings_registry.py`) must classify every `Settings` field (a test fails
+otherwise): `live` / `restart` / `reindex` / `bootstrap` (not UI-editable) and `secret`. UI-stored secrets are
+Fernet-encrypted with `SETTINGS_ENCRYPTION_KEY` and write-only; secret values must never reach a response,
+log, trace or audit row.
 
 **Dev (local Compose / laptop)**: set everything in `.env` (see `.env.example`). `RAG_ENV`
 should be unset or `dev` — the config-file step uses `config/config.dev.json`.

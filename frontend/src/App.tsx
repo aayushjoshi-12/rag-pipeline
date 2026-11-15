@@ -9,6 +9,7 @@ import DocumentsPage from './pages/DocumentsPage'
 import LoginPage from './pages/LoginPage'
 import OverviewPage from './pages/OverviewPage'
 import RolesPage from './pages/RolesPage'
+import SettingsPage from './pages/settings/SettingsPage'
 import TracesPage from './pages/TracesPage'
 import UsagePage from './pages/UsagePage'
 import UsersPage from './pages/UsersPage'
@@ -42,6 +43,9 @@ function Shell() {
   const canUsers = useCan('users:manage')
   const canRoles = useCan('roles:manage')
   const canKeys = useCan('apikeys:manage')
+  const canSettingsRead = useCan('settings:read')
+  const canSettingsManage = useCan('settings:manage')
+  const canSettings = canSettingsRead || canSettingsManage
   const [open, setOpen] = useState(false)
 
   return (
@@ -86,10 +90,13 @@ function Shell() {
               <NavItem to="/usage" icon="usage" label="Usage" />
             </>
           )}
-          {(canUsers || canRoles || canKeys) && <div className="nav-group">Admin</div>}
+          {(canUsers || canRoles || canKeys || canSettings) && (
+            <div className="nav-group">Admin</div>
+          )}
           {canUsers && <NavItem to="/users" icon="users" label="Users" />}
           {canRoles && <NavItem to="/roles" icon="roles" label="Roles" />}
           {canKeys && <NavItem to="/api-keys" icon="key" label="API keys" />}
+          {canSettings && <NavItem to="/settings" icon="settings" label="Settings" />}
         </nav>
         <div className="sidebar-foot">
           {me?.auth_enabled ? (
@@ -170,6 +177,14 @@ function Shell() {
               element={
                 <RequirePermission permission="apikeys:manage">
                   <ApiKeysPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <RequirePermission permission={['settings:read', 'settings:manage']}>
+                  <SettingsPage />
                 </RequirePermission>
               }
             />

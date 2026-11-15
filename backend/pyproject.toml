@@ -33,6 +33,7 @@ dependencies = [
     "pgvector>=0.5.0",
     "pyjwt>=2.8",
     "boto3>=1.44.3",
+    "cryptography>=50.0.2",
 ]
 
 [dependency-groups]
@@ -76,3 +77,4 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["no_enc_key: run without SETTINGS_ENCRYPTION_KEY set"]

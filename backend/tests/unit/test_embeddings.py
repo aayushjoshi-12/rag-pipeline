@@ -16,19 +16,19 @@ def test_get_embedder_ollama_default() -> None:
 
 
 def test_get_embedder_ollama_uses_settings_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(emb._settings, "ollama_base_url", "http://test:9999")
+    monkeypatch.setenv("OLLAMA_BASE_URL", "http://test:9999")
     embedder = emb.get_embedder(provider="ollama")
     assert embedder.base_url == "http://test:9999"
 
 
 def test_get_embedder_openai_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(emb._settings, "openai_api_key", "")
+    monkeypatch.setenv("OPENAI_API_KEY", "")
     with pytest.raises(ValueError, match="OPENAI_API_KEY"):
         emb.get_embedder(provider="openai", model="text-embedding-3-small")
 
 
 def test_get_embedder_openai(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(emb._settings, "openai_api_key", "sk-test")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     embedder = emb.get_embedder(provider="openai", model="text-embedding-3-small")
     assert isinstance(embedder, emb.OpenAIEmbedder)
     assert embedder.model == "text-embedding-3-small"

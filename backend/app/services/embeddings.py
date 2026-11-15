@@ -8,8 +8,6 @@ from typing import Protocol, cast, runtime_checkable
 
 from app.config import Settings
 
-_settings = Settings()
-
 _VALID_PROVIDERS = ("ollama", "openai")
 
 _EMBED_TIMEOUT_SECONDS = 60.0
@@ -152,13 +150,15 @@ class OpenAIEmbedder:
 def get_embedder(
     provider: str | None = None,
     model: str | None = None,
+    settings: Settings | None = None,
 ) -> Embedder:
     """Return an ``Embedder`` for the configured provider.
 
     Parameters default to the values in ``Settings`` when omitted.
     """
-    provider = provider or _settings.embedding_provider
-    model = model or _settings.embedding_model
+    cfg = settings or Settings()  # fresh: picks up admin-UI changes (ticket 43)
+    provider = provider or cfg.embedding_provider
+    model = model or cfg.embedding_model
 
     if provider not in _VALID_PROVIDERS:
         raise ValueError(
@@ -167,14 +167,14 @@ def get_embedder(
         )
 
     if provider == "ollama":
-        return OllamaEmbedder(model=model, base_url=_settings.ollama_base_url)
+        return OllamaEmbedder(model=model, base_url=cfg.ollama_base_url)
 
     if provider == "openai":
-        if not _settings.openai_api_key:
+        if not cfg.openai_api_key:
             raise ValueError(
                 "OPENAI_API_KEY is required for the 'openai' embedding provider."
             )
-        return OpenAIEmbedder(model=model, api_key=_settings.openai_api_key)
+        return OpenAIEmbedder(model=model, api_key=cfg.openai_api_key)
 
     # Unreachable — _VALID_PROVIDERS guard above.
     raise ValueError(f"Unhandled embedding provider '{provider}'.")  # pragma: no cover

@@ -21,9 +21,19 @@ from app.http_common import (
     install_error_handlers,
 )
 from app.observability import configure_for_server
-from app.routers import api_keys, auth, capabilities, chat, documents, health, search, traces
+from app.routers import (
+    api_keys,
+    auth,
+    capabilities,
+    chat,
+    documents,
+    health,
+    search,
+    traces,
+)
 from app.routers import cache as cache_router
-from app.services import keyword, observability, retriever
+from app.routers import settings as settings_router
+from app.services import keyword, observability, retriever, runtime_settings
 from app.services.auth import accounts
 from app.services.langfuse import configure_from_settings
 from app.services.vectorstore import VectorStoreMismatchError, log_effective_settings
@@ -87,6 +97,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception as exc:
         logger.warning("DB not reachable at startup: %s", exc)
     await _seed_auth()
+    await runtime_settings.start(async_session)  # the admin-UI settings layer (ticket 43)
     await asyncio.to_thread(log_effective_settings, settings=settings)
     await _check_keyword_index()
     yield
@@ -115,6 +126,7 @@ _TAGS = [
     {"name": "search", "description": "Ranked passages without an LLM."},
     {"name": "chat", "description": "Retrieval-augmented answers with sources."},
     {"name": "cache", "description": "Query cache statistics and purge."},
+    {"name": "settings", "description": "Runtime settings: view, change, test connections, audit."},
     {"name": "observability", "description": "Traces, usage and cost."},
 ]
 
@@ -142,6 +154,7 @@ def build_app(cfg: Settings) -> FastAPI:
         (chat.router, "chat"),
         (search.router, None),
         (cache_router.router, None),
+        (settings_router.router, None),
         (traces.router, "observability"),
     ]
     for router, tag in routers:

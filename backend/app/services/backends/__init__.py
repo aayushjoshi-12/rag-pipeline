@@ -10,8 +10,6 @@ from app.services.backends.openai_backend import OpenAIBackend
 from app.services.backends.openrouter_backend import OpenRouterBackend
 from app.services.parse_errors import InvalidBackendError
 
-_settings = Settings()
-
 VALID_PARSER_PROVIDERS = ("openrouter", "openai", "anthropic", "ocr")
 
 
@@ -24,7 +22,7 @@ def get_parser_backend(
     ``provider``/``settings`` default to ``Settings`` when omitted. Never silently swaps a
     missing provider key — missing keys raise so misconfig surfaces immediately.
     """
-    cfg = settings or _settings
+    cfg = settings or Settings()
     provider = provider or cfg.parser_provider
 
     if provider not in VALID_PARSER_PROVIDERS:

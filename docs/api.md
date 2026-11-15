@@ -302,6 +302,26 @@ log of accepted breaks), then run `make openapi`; the export refuses to overwrit
 Limits: the check works on the schema, so changed semantics with the same shape are not detected, and anyone can hand-edit the
 snapshot, so reviewers should look at `docs/openapi.json` and the ack file in every diff.
 
+## Runtime settings (`/v1/settings`)
+
+Admin API behind the Settings window (ADR-0008). `GET` needs `settings:read` or `settings:manage`; everything
+else needs `settings:manage` (API keys can never hold it).
+
+| Call | Purpose |
+|---|---|
+| `GET /v1/settings` | Every setting: effective `value` (null for secrets, see `is_set`), `default`, `source` (`env` > `ui` > `config` > `default`), `locked` + `locked_reason`, `apply` (`live`, `restart`, `reindex`, `bootstrap`), `restart_pending`, who/when; plus a `summary` (secrets enabled, restart-pending keys, first-run `missing` hints). |
+| `PATCH /v1/settings` | `{"set": {key: value}, "reset": [key], "confirm_reindex": false, "dry_run": false}`. All or nothing. 422 with one entry per bad key (`loc: ["settings", key]`); 409 `setting_locked` (pinned by env), `setting_not_editable` (bootstrap), `secrets_disabled`, `reindex_confirmation_required`. With `confirm_reindex` the value is applied and the reindex queued. |
+| `POST /v1/settings/{key}/reset` | Back to config.json / the default (clears a secret). |
+| `POST /v1/settings/test/{service}` | `llm`, `embeddings`, `vector_store`, `storage`, `parser`: cheap connectivity check of the saved settings. |
+| `GET /v1/settings/reindex`, `POST /v1/settings/reindex` | Reindex state (Celery) and index drift problems; (re)queue one (`{"confirm_reindex": true}`). |
+| `GET /v1/settings/audit?limit&before&key` | Change history. Secret rows carry no values. |
+
+```bash
+curl -s -X PATCH $API/v1/settings -H "$AUTH" -H 'Content-Type: application/json' \
+  -d '{"set": {"default_top_k": 8, "openrouter_api_key": "sk-or-..."}}'
+# the next request already uses top_k 8; the key is stored encrypted and never returned
+```
+
 ## `POST /search` - ranked passages, no LLM
 
 Permission: `search:use`. Never calls an LLM and needs no LLM key, so it keeps working when the LLM

@@ -7,6 +7,7 @@ import type {
   ChatStreamEvent,
   Chunk,
   CacheStats,
+  ConnectionTest,
   Credits,
   DayUsage,
   Document,
@@ -15,6 +16,11 @@ import type {
   Insights,
   Job,
   ManagedUser,
+  ReindexStatus,
+  SettingsAuditRow,
+  SettingsPatchInput,
+  SettingsPatchResult,
+  SettingsView,
   Me,
   PermissionInfo,
   Role,
@@ -33,10 +39,13 @@ export const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 export class ApiError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  /** The raw `detail` of the error body (e.g. per-field validation errors), when there was one. */
+  readonly detail: unknown
+  constructor(status: number, message: string, detail?: unknown) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -52,18 +61,25 @@ function validationMessage(detail: unknown): string | null {
   return parts.every((p) => p !== null) ? parts.join('; ') : null
 }
 
-async function errorMessage(res: Response): Promise<string> {
+async function errorInfo(res: Response): Promise<{ message: string; detail: unknown }> {
   try {
     const body: unknown = await res.json()
     if (body && typeof body === 'object' && 'detail' in body) {
       const detail = (body as { detail: unknown }).detail
-      if (typeof detail === 'string') return detail
-      return validationMessage(detail) ?? JSON.stringify(detail)
+      if (typeof detail === 'string') return { message: detail, detail }
+      if (
+        detail &&
+        typeof detail === 'object' &&
+        'message' in detail &&
+        typeof (detail as { message: unknown }).message === 'string'
+      )
+        return { message: (detail as { message: string }).message, detail }
+      return { message: validationMessage(detail) ?? JSON.stringify(detail), detail }
     }
   } catch {
     /* non-JSON error body */
   }
-  return res.statusText || `HTTP ${res.status}`
+  return { message: res.statusText || `HTTP ${res.status}`, detail: undefined }
 }
 
 let refreshing: Promise<boolean> | null = null
@@ -124,7 +140,10 @@ async function sendAuthed(path: string, init: RequestInit): Promise<Response> {
 /** The single request path for JSON calls: every API call goes through here, so errors are uniform. */
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await sendAuthed(path, init)
-  if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
+  if (!res.ok) {
+    const info = await errorInfo(res)
+    throw new ApiError(res.status, info.message, info.detail)
+  }
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
 }
@@ -153,7 +172,7 @@ async function chatStream(
     // an older backend (or a proxy) without the route: use the plain endpoint instead
     if ([404, 405, 501].includes(res.status))
       throw new StreamUnavailableError(`streaming is not available (HTTP ${res.status})`)
-    throw new ApiError(res.status, await errorMessage(res))
+    throw new ApiError(res.status, (await errorInfo(res)).message)
   }
   if (!res.body || !(res.headers.get('Content-Type') ?? '').includes('text/event-stream'))
     throw new StreamUnavailableError('the server did not answer with an event stream')
@@ -195,6 +214,21 @@ export const api = {
   createApiKey: (input: ApiKeyCreateInput) =>
     request<ApiKeyCreated>('/api-keys', { method: 'POST', body: JSON.stringify(input) }),
   revokeApiKey: (id: string) => request<ApiKey>(`/api-keys/${id}/revoke`, { method: 'POST' }),
+  getSettings: () => request<SettingsView>('/settings'),
+  patchSettings: (input: SettingsPatchInput) =>
+    request<SettingsPatchResult>('/settings', { method: 'PATCH', body: JSON.stringify(input) }),
+  settingsAudit: (before?: string) =>
+    request<SettingsAuditRow[]>(
+      `/settings/audit?limit=100${before ? `&before=${encodeURIComponent(before)}` : ''}`,
+    ),
+  reindexStatus: () => request<ReindexStatus>('/settings/reindex'),
+  queueReindex: (kind: 'reindex' | 'rebuild_fts' = 'reindex') =>
+    request<{ queued: boolean; error: string | null }>('/settings/reindex', {
+      method: 'POST',
+      body: JSON.stringify({ confirm_reindex: true, kind }),
+    }),
+  testConnection: (service: string) =>
+    request<ConnectionTest>(`/settings/test/${service}`, { method: 'POST' }),
   listRoles: () => request<Role[]>('/roles'),
   createRole: (input: RoleInput) =>
     request<Role>('/roles', { method: 'POST', body: JSON.stringify(input) }),

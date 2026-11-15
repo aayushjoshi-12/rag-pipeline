@@ -31,7 +31,6 @@ from app.config import VECTOR_STORES, Settings
 
 logger = logging.getLogger(__name__)
 
-_settings = Settings()
 
 _VALID_VECTOR_STORES = VECTOR_STORES
 
@@ -238,12 +237,13 @@ class ChromaStore:
         collection_name: str | None = None,
         vector_settings: VectorSettings | None = None,
     ) -> None:
-        self._host = host or _settings.chroma_host
-        self._port = port or _settings.chroma_port
-        self.settings = vector_settings or resolve_vector_settings(_settings, "chroma")
+        cfg0 = Settings()
+        self._host = host or cfg0.chroma_host
+        self._port = port or cfg0.chroma_port
+        self.settings = vector_settings or resolve_vector_settings(cfg0, "chroma")
         self._client = _chroma_client(self._host, self._port)
         self._collection = self._client.get_or_create_collection(
-            name=collection_name or _settings.chroma_collection, configuration=cast(Any, self._configuration())
+            name=collection_name or cfg0.chroma_collection, configuration=cast(Any, self._configuration())
         )
 
     def _configuration(self) -> dict[str, Any]:
@@ -405,7 +405,7 @@ def get_vector_store(
     pgvector creates its schema/index idempotently, and both stores raise
     ``VectorStoreMismatchError`` when the stored index disagrees with the configuration.
     """
-    cfg = settings or _settings
+    cfg = settings or Settings()
     vector_store = vector_store or cfg.vector_store
 
     if vector_store not in _VALID_VECTOR_STORES:
@@ -438,7 +438,7 @@ def get_vector_store(
 
 def log_effective_settings(store: VectorStore | None = None, *, settings: Settings | None = None) -> None:
     """Startup log line with the effective vector settings; logs an error on a mismatch, never raises."""
-    cfg = settings or _settings
+    cfg = settings or Settings()
     effective = resolve_vector_settings(cfg)
     logger.info("vector store: %s", effective.as_dict())
     try:

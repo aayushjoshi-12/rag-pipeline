@@ -5,6 +5,9 @@ import logging
 import math
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -72,8 +75,67 @@ SECRET_FIELD_NAMES: frozenset[str] = frozenset(
         "langfuse_secret_key",
         "s3_access_key_id",
         "s3_secret_access_key",
+        "settings_encryption_key",
+        "settings_encryption_key_previous",
     }
 )
+
+# ── The "UI" layer (ticket 43): admin overrides stored in the database ────────────────────────────
+# A process-global snapshot, replaced atomically by app.services.runtime_settings after it has been
+# read from ``app_settings`` and validated. ``DbOverridesSource`` serves it to every ``Settings()``,
+# ranked below env vars / .env (so an env-pinned key can never be changed from the UI) and above
+# config.<env>.json and the built-in defaults.
+_db_overrides: dict[str, Any] = {}
+_db_overrides_ctx: ContextVar[dict[str, Any] | None] = ContextVar("db_overrides_ctx", default=None)
+
+
+def get_db_overrides() -> dict[str, Any]:
+    """The UI-layer values in force for this task/process (a validation context wins over the snapshot)."""
+    ctx = _db_overrides_ctx.get()
+    return dict(_db_overrides if ctx is None else ctx)
+
+
+def set_db_overrides(values: dict[str, Any]) -> None:
+    global _db_overrides
+    _db_overrides = dict(values)
+
+
+@contextmanager
+def db_overrides_as(values: dict[str, Any]) -> Iterator[None]:
+    """Build ``Settings()`` as if ``values`` were the stored UI layer (candidate validation, tests)."""
+    token = _db_overrides_ctx.set(dict(values))
+    try:
+        yield
+    finally:
+        _db_overrides_ctx.reset(token)
+
+
+def env_pin(field_name: str) -> str | None:
+    """How ``field_name`` is pinned from outside, or ``None``: ``"VAR"`` (process env) / ``"VAR (.env file)"``."""
+    upper = field_name.upper()
+    for key, value in os.environ.items():
+        if key.upper() == upper and value != "":  # an empty pass-through (compose `${VAR:-}`) pins nothing
+            return key
+    files = Settings.model_config.get("env_file")
+    paths: list[Any] = [files] if isinstance(files, (str, Path)) else list(files or ())
+    for path in paths:
+        if not path or not Path(str(path)).is_file():
+            continue
+        from dotenv import dotenv_values
+
+        for key, file_value in dotenv_values(str(path)).items():
+            if key.upper() == upper and file_value not in (None, ""):
+                return f"{key} (.env file)"
+    return None
+
+
+def config_file_keys() -> frozenset[str]:
+    """Field names given a non-null value by config/config.<env>.json (the "config" layer)."""
+    try:
+        values = _load_environment_json(Settings)
+    except SettingsError:
+        return frozenset()
+    return frozenset(k for k, v in values.items() if v is not None)
 
 
 def _load_environment_json(settings_cls: type[BaseSettings]) -> dict[str, Any]:
@@ -119,7 +181,7 @@ class EnvJsonSettingsSource(PydanticBaseSettingsSource):
     """pydantic-settings source for the per-environment JSON config file.
 
     Ranked lowest so env vars / .env always win. Effective precedence (highest first):
-      init > env vars > .env > env JSON > defaults
+      init > env vars > .env > admin UI (database) > env JSON > defaults
     """
 
     def __init__(self, settings_cls: type[BaseSettings]) -> None:
@@ -156,11 +218,29 @@ def _env_files() -> str | tuple[str, ...]:
     return (str(repo_root / ".env"), ".env")
 
 
+class DbOverridesSource(PydanticBaseSettingsSource):
+    """pydantic-settings source for the admin UI layer (see ``get_db_overrides``)."""
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return get_db_overrides().get(field_name), field_name, False
+
+    def prepare_field_value(
+        self, field_name: str, field: FieldInfo, value: Any, value_is_complex: bool
+    ) -> Any:
+        return value
+
+    def __call__(self) -> dict[str, Any]:
+        return {k: v for k, v in get_db_overrides().items() if k in self.settings_cls.model_fields}
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=_env_files(),
         env_file_encoding="utf-8",
         extra="ignore",
+        # Empty variables (docker-compose `${VAR:-}` pass-throughs) are "not set": they neither override a lower layer
+        # (admin UI, config.json, default) nor lock the setting in the admin UI.
+        env_ignore_empty=True,
     )
 
     @classmethod
@@ -177,6 +257,7 @@ class Settings(BaseSettings):
             env_settings,
             dotenv_settings,
             file_secret_settings,
+            DbOverridesSource(settings_cls),
             EnvJsonSettingsSource(settings_cls),
         )
 
@@ -185,6 +266,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     port: int = 8000
     secret_key: str = ""
+    #: Encrypts secret settings stored from the admin UI (Fernet key derived from it; >= 32 random chars).
+    #: Unset = secrets cannot be stored from the UI. Env/K8s Secret only. See ADR-0008.
+    settings_encryption_key: str = ""
+    #: Older encryption key(s), comma separated, still accepted for decryption while rotating.
+    settings_encryption_key_previous: str = ""
+    #: How often (seconds) each API process / worker task re-reads the UI layer from the database.
+    settings_refresh_seconds: float = 5.0
     # ── Auth / RBAC ──────────────────────────────────────────────────────────
     auth_enabled: bool = True
     access_token_minutes: int = 30
@@ -405,6 +493,8 @@ class Settings(BaseSettings):
         if self.cleanup_orphan_age_hours < 0:
             raise SettingsError("cleanup_orphan_age_hours must be >= 0.")
         self._warn_langfuse()
+        if not 0.5 <= self.settings_refresh_seconds <= 3600:
+            raise SettingsError("settings_refresh_seconds must be within 0.5..3600.")
         if not (256 <= self.parser_max_completion_tokens <= 32000):
             raise SettingsError("parser_max_completion_tokens must be within 256..32000.")
         return self

@@ -101,6 +101,37 @@ def rebuild_index() -> str:
     return "index rebuilt"
 
 
+async def _load_settings_layer() -> None:
+    """CLI commands see the same effective settings as the server (the admin-UI layer included)."""
+    from app.services import runtime_settings
+
+    async with async_session() as session:
+        await runtime_settings.refresh_quietly(session)
+
+
+async def rotate_settings_key() -> dict[str, int]:
+    """Re-encrypt every stored secret under the primary SETTINGS_ENCRYPTION_KEY."""
+    from app.config import Settings
+    from app.services import runtime_settings as rt
+
+    cipher = rt.cipher_for(Settings())
+    if not cipher.enabled:
+        raise SystemExit("error: SETTINGS_ENCRYPTION_KEY is not set")
+    done = failed = 0
+    async with async_session() as session:
+        for row in await rt.load_rows(session):
+            if not row.is_secret or not row.secret_blob:
+                continue
+            try:
+                row.secret_blob = cipher.rotate(row.key, row.secret_blob)
+                done += 1
+            except Exception:
+                failed += 1
+                print(f"error: cannot re-encrypt '{row.key}' (is the old key in SETTINGS_ENCRYPTION_KEY_PREVIOUS?)", file=sys.stderr)
+        await session.commit()
+    return {"rotated": done, "failed": failed}
+
+
 def _ensure_bucket(wait: int) -> int:
     import time
 
@@ -140,6 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser(
         "rebuild-fts", help="recreate the keyword-search columns/index with RETRIEVAL_FTS_CONFIG"
     )
+    sub.add_parser(
+        "rotate-settings-key",
+        help="re-encrypt stored secret settings under SETTINGS_ENCRYPTION_KEY (old key in ..._PREVIOUS)",
+    )
     sub.add_parser("rebuild-index", help="rebuild the pgvector ANN index on the current rows")
     eb = sub.add_parser(
         "ensure-bucket", help="create S3_BUCKET if it does not exist (local S3 emulators)"
@@ -151,6 +186,12 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "ensure-bucket":
         return _ensure_bucket(args.wait)
+    if args.command == "rotate-settings-key":
+        out = asyncio.run(rotate_settings_key())
+        print(json.dumps(out))
+        return 1 if out["failed"] else 0
+    if args.command in ("vector-status", "reindex", "fts-status", "rebuild-fts", "rebuild-index"):
+        asyncio.run(_load_settings_layer())
     if args.command == "vector-status":
         info = asyncio.run(vector_status())
         print(json.dumps(info, indent=2, default=str))

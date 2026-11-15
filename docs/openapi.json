@@ -246,6 +246,63 @@
         "title": "ApiKeyOut",
         "type": "object"
       },
+      "AuditOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "new_value": {
+            "title": "New Value"
+          },
+          "old_value": {
+            "title": "Old Value"
+          },
+          "secret": {
+            "title": "Secret",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "at",
+          "actor",
+          "action",
+          "key",
+          "secret"
+        ],
+        "title": "AuditOut",
+        "type": "object"
+      },
       "Body_replace_document_v1_documents__document_id__put": {
         "properties": {
           "file": {
@@ -1136,6 +1193,24 @@
         "title": "FromUrlRequest",
         "type": "object"
       },
+      "GroupOut": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "description"
+        ],
+        "title": "GroupOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1494,6 +1569,24 @@
         "title": "MeOut",
         "type": "object"
       },
+      "MissingOut": {
+        "properties": {
+          "area": {
+            "title": "Area",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "area",
+          "message"
+        ],
+        "title": "MissingOut",
+        "type": "object"
+      },
       "ModeStatOut": {
         "properties": {
           "avg_ms": {
@@ -1592,6 +1685,78 @@
         "title": "PaginationCaps",
         "type": "object"
       },
+      "PatchResult": {
+        "properties": {
+          "changed": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Changed",
+            "type": "array"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "reindex": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReindexQueued"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reindex_required": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reindex Required",
+            "type": "array"
+          },
+          "reset": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Reset",
+            "type": "array"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restart Required",
+            "type": "array"
+          },
+          "settings": {
+            "description": "The touched settings after the change.",
+            "items": {
+              "$ref": "#/components/schemas/SettingOut"
+            },
+            "title": "Settings",
+            "type": "array"
+          },
+          "unchanged": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unchanged",
+            "type": "array"
+          }
+        },
+        "required": [
+          "changed",
+          "reset",
+          "unchanged",
+          "restart_required",
+          "reindex_required",
+          "dry_run",
+          "settings"
+        ],
+        "title": "PatchResult",
+        "type": "object"
+      },
       "PermissionOut": {
         "properties": {
           "description": {
@@ -1664,6 +1829,167 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
+        "type": "object"
+      },
+      "ReindexQueued": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          },
+          "queued": {
+            "title": "Queued",
+            "type": "boolean"
+          },
+          "task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Task Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "queued"
+        ],
+        "title": "ReindexQueued",
+        "type": "object"
+      },
+      "ReindexRequest": {
+        "properties": {
+          "confirm_reindex": {
+            "default": false,
+            "title": "Confirm Reindex",
+            "type": "boolean"
+          },
+          "kind": {
+            "default": "reindex",
+            "enum": [
+              "reindex",
+              "rebuild_fts"
+            ],
+            "title": "Kind",
+            "type": "string"
+          }
+        },
+        "title": "ReindexRequest",
+        "type": "object"
+      },
+      "ReindexStatus": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Kind"
+          },
+          "needed": {
+            "description": "The stored index differs from the settings (searches may 503 until fixed).",
+            "title": "Needed",
+            "type": "boolean"
+          },
+          "problems": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Problems",
+            "type": "array"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "queued_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued By"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "state": {
+            "enum": [
+              "idle",
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "unknown"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Id"
+          }
+        },
+        "required": [
+          "state",
+          "needed",
+          "problems"
+        ],
+        "title": "ReindexStatus",
         "type": "object"
       },
       "RetrievalCaps": {
@@ -2127,6 +2453,335 @@
         "title": "SearchResult",
         "type": "object"
       },
+      "SettingOut": {
+        "properties": {
+          "apply": {
+            "description": "live = next request/task; restart = after a process restart; reindex = needs a confirmed reindex; bootstrap = not editable here.",
+            "enum": [
+              "live",
+              "restart",
+              "reindex",
+              "bootstrap"
+            ],
+            "title": "Apply",
+            "type": "string"
+          },
+          "choices": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Choices"
+          },
+          "default": {
+            "title": "Default"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "disabled_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Editable in principle, but not possible right now.",
+            "title": "Disabled Reason"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "is_set": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Secrets only: whether a value is in force.",
+            "title": "Is Set"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "string",
+              "text",
+              "integer",
+              "number",
+              "boolean",
+              "enum",
+              "path"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "locked": {
+            "description": "Cannot be changed here (pinned by the environment, or a bootstrap setting).",
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "locked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked Reason"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Consequence / caveat shown next to the field.",
+            "title": "Note"
+          },
+          "nullable": {
+            "title": "Nullable",
+            "type": "boolean"
+          },
+          "reindex_action": {
+            "anyOf": [
+              {
+                "enum": [
+                  "reindex",
+                  "rebuild_fts"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reindex Action"
+          },
+          "restart_pending": {
+            "default": false,
+            "description": "Changed since this process started; needs a restart.",
+            "title": "Restart Pending",
+            "type": "boolean"
+          },
+          "secret": {
+            "description": "Write-only: `value` and `default` are always null; see `is_set`.",
+            "title": "Secret",
+            "type": "boolean"
+          },
+          "shadowed": {
+            "default": false,
+            "description": "A UI value is stored but the environment overrides it.",
+            "title": "Shadowed",
+            "type": "boolean"
+          },
+          "shadowed_value": {
+            "title": "Shadowed Value"
+          },
+          "source": {
+            "description": "Which layer wins: env > ui (database) > config (config.<env>.json) > default.",
+            "enum": [
+              "env",
+              "ui",
+              "config",
+              "default"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "undecryptable": {
+            "default": false,
+            "title": "Undecryptable",
+            "type": "boolean"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "value": {
+            "description": "Effective value (null for secrets).",
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "group",
+          "description",
+          "kind",
+          "nullable",
+          "apply",
+          "secret",
+          "source",
+          "locked"
+        ],
+        "title": "SettingOut",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/GroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "settings": {
+            "items": {
+              "$ref": "#/components/schemas/SettingOut"
+            },
+            "title": "Settings",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/SettingsSummary"
+          }
+        },
+        "required": [
+          "groups",
+          "settings",
+          "summary"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "SettingsPatch": {
+        "properties": {
+          "confirm_reindex": {
+            "default": false,
+            "description": "Required when a change needs a reindex.",
+            "title": "Confirm Reindex",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "default": false,
+            "description": "Validate and report the consequences without saving.",
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "reset": {
+            "description": "Keys to return to config.json / default (clears secrets).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Reset",
+            "type": "array"
+          },
+          "set": {
+            "additionalProperties": true,
+            "description": "key -> new value (secrets: the plain value, never echoed).",
+            "title": "Set",
+            "type": "object"
+          }
+        },
+        "title": "SettingsPatch",
+        "type": "object"
+      },
+      "SettingsSummary": {
+        "properties": {
+          "missing": {
+            "description": "First-run hints: what is not configured.",
+            "items": {
+              "$ref": "#/components/schemas/MissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "overrides_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overrides Error"
+          },
+          "refresh_seconds": {
+            "title": "Refresh Seconds",
+            "type": "number"
+          },
+          "restart_pending": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Restart Pending",
+            "type": "array"
+          },
+          "secrets_enabled": {
+            "title": "Secrets Enabled",
+            "type": "boolean"
+          },
+          "undecryptable": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Undecryptable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "secrets_enabled",
+          "restart_pending",
+          "overrides_error",
+          "undecryptable",
+          "refresh_seconds"
+        ],
+        "title": "SettingsSummary",
+        "type": "object"
+      },
       "SourceOut": {
         "properties": {
           "chunk_index": {
@@ -2219,6 +2874,39 @@
           "score"
         ],
         "title": "SourceOut",
+        "type": "object"
+      },
+      "TestOut": {
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "latency_ms": {
+            "title": "Latency Ms",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "service": {
+            "title": "Service",
+            "type": "string"
+          }
+        },
+        "required": [
+          "service",
+          "ok",
+          "detail",
+          "provider",
+          "latency_ms"
+        ],
+        "title": "TestOut",
         "type": "object"
       },
       "TokenPair": {
@@ -4601,6 +5289,566 @@
         ]
       }
     },
+    "/v1/settings": {
+      "get": {
+        "description": "Every setting with its effective value, where it comes from (`env` > `ui` > `config` > `default`), whether it is locked, and when a change takes effect (`apply`). Secrets are write-only: `value` is always null and only `is_set` says whether one is stored. Needs `settings:read` or `settings:manage`.",
+        "operationId": "get_settings_view_v1_settings_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Effective settings with their source (never secret values)",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "`set` maps keys to new values (a secret is sent as its plain value and never returned); `reset` lists keys to return to config.json / the built-in default (for a secret: clear it). Everything is validated first. Keys pinned by an environment variable and bootstrap keys are rejected with 409. A change that needs a reindex is rejected with 409 `reindex_confirmation_required` unless `confirm_reindex` is true; with it, the value is applied and the reindex is queued. `dry_run` validates and reports only.",
+        "operationId": "patch_settings_v1_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "409": {
+            "description": "Locked by the environment, not editable, secrets disabled, or reindex not confirmed."
+          },
+          "422": {
+            "description": "A value is invalid (per-setting messages in `detail`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Change settings (all or nothing)",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/audit": {
+      "get": {
+        "operationId": "settings_audit_v1_settings_audit_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "in": "query",
+            "name": "key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AuditOut"
+                  },
+                  "title": "Response Settings Audit V1 Settings Audit Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Who changed which setting (no secret values)",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/reindex": {
+      "get": {
+        "operationId": "reindex_status_v1_settings_reindex_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReindexStatus"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Reindex progress and index drift",
+        "tags": [
+          "settings"
+        ]
+      },
+      "post": {
+        "operationId": "queue_reindex_v1_settings_reindex_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReindexRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReindexQueued"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "409": {
+            "description": "Locked by the environment, not editable, secrets disabled, or reindex not confirmed."
+          },
+          "422": {
+            "description": "A value is invalid (per-setting messages in `detail`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Queue a reindex (retry, or run one on demand)",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/test/{service}": {
+      "post": {
+        "description": "Cheap and safe: LLM/parser = list models with the key (no tokens spent), embeddings = embed one short string, vector store = heartbeat, storage = head bucket / write test. Never returns secrets.",
+        "operationId": "test_connection_v1_settings_test__service__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service",
+            "required": true,
+            "schema": {
+              "enum": [
+                "llm",
+                "embeddings",
+                "vector_store",
+                "storage",
+                "parser"
+              ],
+              "title": "Service",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Test a service connection with the saved settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/{key}/reset": {
+      "post": {
+        "operationId": "reset_setting_v1_settings__key__reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "confirm_reindex",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Confirm Reindex",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PatchResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "409": {
+            "description": "Locked by the environment, not editable, secrets disabled, or reindex not confirmed."
+          },
+          "422": {
+            "description": "A value is invalid (per-setting messages in `detail`)."
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Return one setting to config.json / the built-in default",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
     "/v1/traces": {
       "get": {
         "operationId": "list_traces_v1_traces_get",
@@ -5400,6 +6648,10 @@
     {
       "description": "Query cache statistics and purge.",
       "name": "cache"
+    },
+    {
+      "description": "Runtime settings: view, change, test connections, audit.",
+      "name": "settings"
     },
     {
       "description": "Traces, usage and cost.",

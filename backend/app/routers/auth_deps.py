@@ -103,3 +103,16 @@ def require(*needed: Permission) -> Callable[..., Awaitable[Principal]]:
         return principal
 
     return _check
+
+
+def require_any(*options: Permission) -> Callable[..., Awaitable[Principal]]:
+    """Dependency: the caller must hold at least one of the listed permissions (else 403)."""
+
+    async def _check(principal: Principal = Depends(get_principal)) -> Principal:
+        if not any(p.value in principal.permissions for p in options):
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, f"missing permission: {' or '.join(p.value for p in options)}"
+            )
+        return principal
+
+    return _check

@@ -107,7 +107,7 @@ def test_permissions_come_from_role_minus_management() -> None:
     got = apikeys.permissions_of(_key(role=SimpleNamespace(permissions=perms)))
     assert got == frozenset(p.value for p in Permission) - KEY_FORBIDDEN
     assert not (got & KEY_FORBIDDEN)
-    assert {"users:manage", "roles:manage", "apikeys:manage"} == set(KEY_FORBIDDEN)
+    assert {"users:manage", "roles:manage", "apikeys:manage", "settings:manage"} == set(KEY_FORBIDDEN)
 
 
 def test_warning_only_for_admin_role() -> None:

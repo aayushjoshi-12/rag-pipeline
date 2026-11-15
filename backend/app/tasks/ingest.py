@@ -12,7 +12,7 @@ from app.config import Settings
 from app.db import ops
 from app.db.enums import JobStatus
 from app.observability import configure_for_server
-from app.services import observability
+from app.services import observability, runtime_settings
 from app.services.embeddings import get_embedder
 from app.services.ingestion import ingest_document
 from app.services.langfuse import configure_from_settings
@@ -21,14 +21,15 @@ from app.services.vectorstore import get_vector_store
 
 
 async def _run(job_id: str, url: str | None = None) -> str:
-    settings = Settings()
-    configure_for_server(level=logging.getLevelName(settings.log_level))
-    configure_from_settings(settings)
     # A fresh NullPool engine per task: asyncio.run() makes a new event loop each call and
     # asyncpg connections are bound to the loop that opened them.
-    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+    engine = create_async_engine(Settings().database_url, poolclass=NullPool)
     try:
         async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            await runtime_settings.refresh_quietly(session)  # admin-UI layer, read fresh for every task
+            settings = Settings()
+            configure_for_server(level=logging.getLevelName(settings.log_level))
+            configure_from_settings(settings)
             try:
                 embedder = get_embedder()
                 store = get_vector_store()

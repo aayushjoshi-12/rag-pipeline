@@ -21,6 +21,8 @@ class Permission(StrEnum):
     ROLES_MANAGE = "roles:manage"
     APIKEYS_MANAGE = "apikeys:manage"
     CACHE_MANAGE = "cache:manage"
+    SETTINGS_READ = "settings:read"
+    SETTINGS_MANAGE = "settings:manage"
 
 
 DESCRIPTIONS: dict[Permission, str] = {
@@ -35,6 +37,8 @@ DESCRIPTIONS: dict[Permission, str] = {
     Permission.ROLES_MANAGE: "Create, edit and delete roles",
     Permission.APIKEYS_MANAGE: "Create, list and revoke API keys",
     Permission.CACHE_MANAGE: "Purge the query cache",
+    Permission.SETTINGS_READ: "View runtime settings (never secret values)",
+    Permission.SETTINGS_MANAGE: "Change runtime settings, store secrets, queue reindexes, read the settings audit log",
 }
 
 ADMIN_ROLE = "admin"
@@ -73,7 +77,12 @@ BUILTIN_ROLES: dict[str, tuple[str, frozenset[Permission]]] = {
 #: Never granted to an API key principal even if its role has them: a leaked machine credential must not
 #: be able to mint keys, users or roles (privilege persistence / escalation). Humans manage; keys consume.
 KEY_FORBIDDEN: frozenset[str] = frozenset(
-    {Permission.USERS_MANAGE.value, Permission.ROLES_MANAGE.value, Permission.APIKEYS_MANAGE.value}
+    {
+        Permission.USERS_MANAGE.value,
+        Permission.ROLES_MANAGE.value,
+        Permission.APIKEYS_MANAGE.value,
+        Permission.SETTINGS_MANAGE.value,
+    }
 )
 
 

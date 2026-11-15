@@ -16,7 +16,7 @@ async def health() -> Response:
     payload: dict[str, Any] = {
         "status": "ok",
         # Public on purpose (no secret): lets the dashboard skip the login form / the /auth/me probe correctly.
-        "auth_enabled": get_settings().auth_enabled,
+        "auth_enabled": (await get_settings()).auth_enabled,
         "checks": {
             c.name: {"ok": c.ok, "detail": c.detail} for c in checks
         },

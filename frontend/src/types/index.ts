@@ -329,3 +329,101 @@ export interface CacheStats {
   }
   traces: { search: CacheKindStats; chat: CacheKindStats }
 }
+
+// ── Settings (ticket 43) ─────────────────────────────────────────────────────
+export type SettingApply = 'live' | 'restart' | 'reindex' | 'bootstrap'
+export type SettingSource = 'env' | 'ui' | 'config' | 'default'
+export type SettingKind = 'string' | 'text' | 'integer' | 'number' | 'boolean' | 'enum' | 'path'
+export type SettingValue = string | number | boolean | null
+
+export interface SettingItem {
+  key: string
+  group: string
+  description: string
+  kind: SettingKind
+  nullable: boolean
+  choices: string[] | null
+  unit: string | null
+  note: string | null
+  apply: SettingApply
+  secret: boolean
+  reindex_action: 'reindex' | 'rebuild_fts' | null
+  /** Effective value; always null for secrets. */
+  value: SettingValue
+  /** Secrets only: is a value in force? */
+  is_set: boolean | null
+  default: SettingValue
+  source: SettingSource
+  locked: boolean
+  locked_reason: string | null
+  disabled_reason: string | null
+  shadowed: boolean
+  shadowed_value: SettingValue
+  updated_at: string | null
+  updated_by: string | null
+  restart_pending: boolean
+  undecryptable: boolean
+}
+
+export interface SettingsView {
+  groups: { id: string; description: string }[]
+  settings: SettingItem[]
+  summary: {
+    secrets_enabled: boolean
+    restart_pending: string[]
+    overrides_error: string | null
+    undecryptable: string[]
+    refresh_seconds: number
+    missing: { area: string; message: string }[]
+  }
+}
+
+export interface SettingsPatchInput {
+  set: Record<string, SettingValue>
+  reset: string[]
+  confirm_reindex?: boolean
+  dry_run?: boolean
+}
+
+export interface SettingsPatchResult {
+  changed: string[]
+  reset: string[]
+  unchanged: string[]
+  restart_required: string[]
+  reindex_required: string[]
+  dry_run: boolean
+  reindex: { queued: boolean; kinds: string[]; task_ids: string[]; error: string | null } | null
+  settings: SettingItem[]
+}
+
+export interface SettingsAuditRow {
+  id: string
+  at: string
+  actor: string
+  action: string
+  key: string
+  old_value: SettingValue
+  new_value: SettingValue
+  secret: boolean
+  detail: Record<string, unknown> | null
+}
+
+export interface ReindexStatus {
+  state: 'idle' | 'pending' | 'running' | 'done' | 'failed' | 'unknown'
+  needed: boolean
+  problems: string[]
+  queued_at: string | null
+  queued_by: string | null
+  kind: string | null
+  task_id: string | null
+  result: Record<string, unknown> | null
+  error: string | null
+}
+
+export interface ConnectionTest {
+  service: string
+  ok: boolean
+  detail: string
+  provider: string
+  latency_ms: number
+}
