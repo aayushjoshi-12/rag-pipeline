@@ -227,6 +227,8 @@ async def retrieve_ranked(
         version is None
     ):  # bypass, layer off, or Redis unavailable: compute (L1 still applies unless bypassed)
         cache.layers["retrieval"] = "bypass" if cache.bypass else "off"
+        if cache.bypass:  # ``cached()`` is skipped here, so count the bypass ourselves (stats parity with L1/L3)
+            qc.counters["retrieval"].bypass += 1
         return await compute()
     key = retrieval_key(
         qc,

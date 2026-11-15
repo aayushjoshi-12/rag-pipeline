@@ -202,3 +202,11 @@ async def test_stats_and_purge_endpoints(ctx: dict[str, Any]) -> None:
     purged = (await c.post("/cache/purge")).json()
     assert purged["purged_keys"] >= 1 and purged["index_version_bumped"]
     assert (await c.post("/search", json={"query": ID_QUERY})).headers["x-cache"] == "miss"
+
+
+async def test_retrieval_bypass_is_counted_in_cache_stats(ctx: dict[str, Any]) -> None:
+    c = ctx["c"]
+    before = (await c.get("/cache/stats")).json()["process"]["layers"]["retrieval"]["bypass"]
+    await c.post("/search", json={"query": ID_QUERY, "cache": False})
+    after = (await c.get("/cache/stats")).json()["process"]["layers"]["retrieval"]["bypass"]
+    assert after == before + 1

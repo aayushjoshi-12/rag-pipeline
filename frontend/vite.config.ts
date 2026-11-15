@@ -10,7 +10,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target, changeOrigin: true, rewrite: (path) => path.replace(/^\/api/, '') },
+      // '^/api/' (regex), not '/api': a bare prefix also captured the SPA route /api-keys (deep link/reload -> 404).
+      '^/api/': { target, changeOrigin: true, rewrite: (path) => path.replace(/^\/api/, '') },
     },
   },
   test: {
