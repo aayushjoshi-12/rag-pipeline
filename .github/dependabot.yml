@@ -4,6 +4,10 @@ updates:
     directory: /backend
     schedule:
       interval: weekly
+    ignore:
+      # Major jumps (language/runtime/toolchain versions, TypeScript, ...) are done by hand with a plan and the full suite.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       python-minor-patch:
         update-types: [minor, patch]
@@ -11,6 +15,10 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    ignore:
+      # Major jumps (language/runtime/toolchain versions, TypeScript, ...) are done by hand with a plan and the full suite.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
@@ -25,6 +33,10 @@ updates:
     directory: /backend
     schedule:
       interval: weekly
+    ignore:
+      # Major jumps (language/runtime/toolchain versions, TypeScript, ...) are done by hand with a plan and the full suite.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       docker-minor-patch:
         update-types: [minor, patch]
@@ -32,6 +44,10 @@ updates:
     directory: /frontend
     schedule:
       interval: weekly
+    ignore:
+      # Major jumps (language/runtime/toolchain versions, TypeScript, ...) are done by hand with a plan and the full suite.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       docker-frontend-minor-patch:
         update-types: [minor, patch]
