@@ -19,13 +19,13 @@ import hmac
 import secrets
 import string
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import ApiKey, Role, User
+from app.db.models import ApiKey, Role, User, utcnow
 from app.services.auth.accounts import ConflictError, InvalidError
 from app.services.auth.permissions import ADMIN_ROLE, KEY_FORBIDDEN
 
@@ -44,11 +44,6 @@ _DUMMY_HASH = hashlib.sha256(b"rag-api-key-dummy").hexdigest()
 
 class InvalidKeyError(Exception):
     """Any reason a presented key is not acceptable. Deliberately carries no detail (no oracle)."""
-
-
-def utcnow() -> datetime:
-    """Naive UTC, matching the other timestamp columns."""
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def hash_secret(secret: str) -> str:

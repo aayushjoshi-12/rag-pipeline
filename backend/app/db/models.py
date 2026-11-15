@@ -27,7 +27,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def _utcnow() -> datetime:
+def utcnow() -> datetime:
     return datetime.now(UTC).replace(tzinfo=None)
 
 
@@ -52,10 +52,10 @@ class Document(Base):
     #: The link a document was ingested from, with query string/credentials removed. NULL for uploads.
     source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), default=_utcnow
+        server_default=func.now(), default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), default=_utcnow, onupdate=_utcnow
+        server_default=func.now(), default=utcnow, onupdate=utcnow
     )
 
     chunks: Mapped[list[Chunk]] = relationship(back_populates="document", cascade="all, delete-orphan")
@@ -108,10 +108,10 @@ class Job(Base):
     #: Ingest summary (mode, kept/added/removed chunk counts, embedded count). Null until done.
     stats: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), default=_utcnow
+        server_default=func.now(), default=utcnow
     )
     updated_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), default=_utcnow, onupdate=_utcnow
+        server_default=func.now(), default=utcnow, onupdate=utcnow
     )
 
     document: Mapped[Document] = relationship(back_populates="jobs")
@@ -127,7 +127,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=utcnow)
 
     roles: Mapped[list[Role]] = relationship(
         secondary="user_roles", back_populates="users", lazy="selectin"
@@ -178,7 +178,7 @@ class Trace(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
     created_at: Mapped[datetime] = mapped_column(
-        server_default=func.now(), default=_utcnow, index=True
+        server_default=func.now(), default=utcnow, index=True
     )
     kind: Mapped[str] = mapped_column(String(16))  # "chat" | "search" | "ingest"
     status: Mapped[str] = mapped_column(String(16))  # "ok" | "error"
@@ -214,7 +214,7 @@ class ApiKey(Base):
         ForeignKey("users.id", ondelete="CASCADE"), index=True
     )
     role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id", ondelete="RESTRICT"), index=True)
-    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
@@ -236,7 +236,7 @@ class AppSetting(Base):
     value: Mapped[object | None] = mapped_column(JSON, nullable=True)
     secret_blob: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_secret: Mapped[bool] = mapped_column(Boolean, default=False)
-    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=utcnow)
     updated_by: Mapped[str] = mapped_column(String(320), default="")
 
 
@@ -250,7 +250,7 @@ class SettingsAudit(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
-    at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+    at: Mapped[datetime] = mapped_column(server_default=func.now(), default=utcnow)
     actor: Mapped[str] = mapped_column(String(320))
     actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     #: set | reset | set_secret | clear_secret | reindex_queued

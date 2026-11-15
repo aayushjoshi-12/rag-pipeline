@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, config_file_keys, db_overrides_as, env_pin
-from app.db.models import AppSetting, SettingsAudit
+from app.db.models import AppSetting, SettingsAudit, utcnow
 from app.services import runtime_settings as rt
 from app.services.settings_registry import (
     GROUPS,
@@ -29,10 +29,6 @@ from app.services.settings_registry import (
 logger = logging.getLogger(__name__)
 
 _AUDIT_VALUE_LIMIT = 2000
-
-
-def utcnow() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class SettingsOpError(Exception):

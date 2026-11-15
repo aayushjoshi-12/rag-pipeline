@@ -69,7 +69,10 @@ def test_wrong_secret_and_tampered_token_rejected() -> None:
         tokens.verify(tok, "access", secret="y" * 40)
     head, payload, sig = tok.split(".")
     with pytest.raises(tokens.TokenError):
-        tokens.verify(f"{head}.{payload}.{sig[:-2]}AA", "access", secret=SECRET)
+        # Flip the FIRST signature character to a different one: the last characters of a base64url signature can
+        # carry unused bits (and "AA" may already be the tail), so editing the end sometimes changes nothing.
+        flipped = ("B" if sig[0] == "A" else "A") + sig[1:]
+        tokens.verify(f"{head}.{payload}.{flipped}", "access", secret=SECRET)
 
 
 def test_alg_none_token_rejected() -> None:

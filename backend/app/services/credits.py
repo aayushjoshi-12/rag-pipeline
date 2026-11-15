@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
 
 import httpx
 import structlog
 
 from app.config import Settings
+from app.schema.traces import CreditsOut
 
 logger = structlog.get_logger(__name__)
 
@@ -16,19 +16,7 @@ CACHE_SECONDS = 60.0
 FAILURE_CACHE_SECONDS = 10.0
 
 
-@dataclass(frozen=True)
-class Credits:
-    available: bool
-    #: Why there is no balance: ``provider_not_openrouter`` | ``no_api_key`` | ``unavailable``.
-    reason: str | None = None
-    limit: float | None = None  # None = the key has no spending limit
-    limit_remaining: float | None = None
-    usage: float | None = None
-    is_free_tier: bool | None = None
-    fetched_at: float | None = None
-
-
-_cache: tuple[float, str, Credits] | None = None  # (expires_at, cache key, value)
+_cache: tuple[float, str, CreditsOut] | None = None  # (expires_at, cache key, value)
 
 
 def reset_cache() -> None:
@@ -42,13 +30,13 @@ def _num(value: object) -> float | None:
     return float(value)
 
 
-async def get_credits(settings: Settings, client: httpx.AsyncClient | None = None) -> Credits:
+async def get_credits(settings: Settings, client: httpx.AsyncClient | None = None) -> CreditsOut:
     """The key's limit/usage, cached for 60 s. Never raises: failures become ``available=False``."""
     global _cache
     if settings.llm_provider != "openrouter":
-        return Credits(False, "provider_not_openrouter")
+        return CreditsOut(available=False, reason="provider_not_openrouter")
     if not settings.openrouter_api_key:
-        return Credits(False, "no_api_key")
+        return CreditsOut(available=False, reason="no_api_key")
     key = f"{settings.openrouter_base_url}|{hash(settings.openrouter_api_key)}"
     now = time.monotonic()
     if _cache and _cache[1] == key and _cache[0] > now:
@@ -61,8 +49,8 @@ async def get_credits(settings: Settings, client: httpx.AsyncClient | None = Non
             )
         resp.raise_for_status()
         data = resp.json()["data"]
-        value = Credits(
-            True,
+        value = CreditsOut(
+            available=True,
             limit=_num(data.get("limit")),
             limit_remaining=_num(data.get("limit_remaining")),
             usage=_num(data.get("usage")),
@@ -73,6 +61,6 @@ async def get_credits(settings: Settings, client: httpx.AsyncClient | None = Non
     except (httpx.HTTPError, KeyError, ValueError, TypeError, AttributeError) as exc:
         # log the exception type only: its text can embed the request URL
         logger.warning("credits_unavailable", error=type(exc).__name__)
-        value, ttl = Credits(False, "unavailable"), FAILURE_CACHE_SECONDS
+        value, ttl = CreditsOut(available=False, reason="unavailable"), FAILURE_CACHE_SECONDS
     _cache = (now + ttl, key, value)
     return value

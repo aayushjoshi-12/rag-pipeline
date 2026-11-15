@@ -73,9 +73,7 @@ _DB = "Needed to reach the database or broker before any setting can be read fro
 _LOCKOUT = "Changing it from a web page could lock every user out or re-key sessions."
 
 
-def _s(group: str, description: str, **kw: Any) -> Spec:
-    return Spec(group, description, **kw)
-
+_s = Spec
 
 REGISTRY: dict[str, Spec] = {
     # ── Retrieval ───────────────────────────────────────────────────────────────

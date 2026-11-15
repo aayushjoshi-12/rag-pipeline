@@ -18,6 +18,8 @@ from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from app.config import csv_list
+
 MIN_KEY_CHARS = 32
 _SALT = b"rag-pipeline/settings-encryption/v1"
 _INFO = b"fernet-key"
@@ -33,7 +35,7 @@ def _fernet(secret: str) -> Fernet:
 
 
 def _split(previous: str) -> list[str]:
-    return [p.strip() for p in previous.split(",") if p.strip()]
+    return csv_list(previous)
 
 
 class SettingsCipher:

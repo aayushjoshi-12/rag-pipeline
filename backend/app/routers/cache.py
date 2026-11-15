@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import statistics
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.models import Trace
+from app.db.models import Trace, utcnow
 from app.routers.auth_deps import require
 from app.routers.deps import get_session, get_settings
 from app.services.auth.permissions import Permission
@@ -79,7 +79,7 @@ async def cache_stats(
     days: Annotated[int, Query(ge=1, le=90)] = 7,
 ) -> CacheStatsOut:
     qc = get_cache(cfg)
-    since = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    since = utcnow() - timedelta(days=days)
     res = await session.execute(
         select(Trace.kind, Trace.duration_ms, Trace.meta).where(
             Trace.created_at >= since, Trace.kind.in_(("search", "chat"))

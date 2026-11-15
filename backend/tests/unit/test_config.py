@@ -145,3 +145,11 @@ def test_retrieval_neighbors_accepts_range(clear_env: None, ok: int) -> None:
 def test_chunk_bounds_validated(clear_env: None, size: int, overlap: int) -> None:
     with pytest.raises(ValidationError, match="chunk_size"):
         Settings(chunk_size=size, chunk_overlap=overlap)
+
+
+def test_csv_list_strips_drops_empties_and_lowers() -> None:
+    from app.config import csv_list
+
+    assert csv_list(" a, B ,, c ,") == ["a", "B", "c"]
+    assert csv_list(" HTTP, S3 ", lower=True) == ["http", "s3"]
+    assert csv_list("") == []

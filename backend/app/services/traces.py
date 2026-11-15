@@ -11,7 +11,7 @@ from typing import Any
 from sqlalchemy import and_, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Trace
+from app.db.models import Trace, utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,7 @@ async def usage(session: AsyncSession, *, days: int, kind: str | None = None) ->
 
 
 async def purge_older_than(session: AsyncSession, days: int) -> int:
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=days)
+    cutoff = utcnow() - timedelta(days=days)
     result = await session.execute(delete(Trace).where(Trace.created_at < cutoff))
     await session.commit()
     return int(result.rowcount or 0)  # type: ignore[attr-defined]  # CursorResult has rowcount

@@ -64,3 +64,13 @@ def test_document_status_is_str_enum() -> None:
 def test_job_status_is_str_enum() -> None:
     assert JobStatus.PENDING == "pending"
     assert JobStatus.DONE == "done"
+
+
+def test_utcnow_is_naive_and_current_utc() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.db.models import utcnow
+
+    now = utcnow()
+    assert now.tzinfo is None
+    assert abs(now - datetime.now(UTC).replace(tzinfo=None)) < timedelta(seconds=5)

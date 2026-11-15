@@ -67,4 +67,4 @@ async def get_insights(
 @router.get("/usage/credits", response_model=CreditsOut)
 async def get_credits(cfg: Annotated[Settings, Depends(get_settings)]) -> CreditsOut:
     """The OpenRouter key balance (read server-side; the key is never returned)."""
-    return CreditsOut.model_validate(await credits.get_credits(cfg))
+    return await credits.get_credits(cfg)

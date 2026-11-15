@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.db.models import ApiKey
+from app.db.models import ApiKey, utcnow
 from app.routers.auth_deps import Principal, require
 from app.routers.deps import get_session, get_settings
 from app.schema.auth import ApiKeyCreate, ApiKeyCreated, ApiKeyOut
@@ -30,7 +30,7 @@ def _http(exc: AccountError) -> HTTPException:
 
 
 def _out(key: ApiKey) -> ApiKeyOut:
-    now = apikeys.utcnow()
+    now = utcnow()
     if key.revoked_at is not None:
         state = "revoked"
     elif key.expires_at is not None and now >= key.expires_at:

@@ -24,6 +24,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def csv_list(value: str, *, lower: bool = False) -> list[str]:
+    """Split a comma-separated setting into stripped, non-empty items (optionally lower-cased)."""
+    items = [x.strip() for x in value.split(",")]
+    return [x.lower() if lower else x for x in items if x]
+
+
 class SettingsError(ValueError):
     """Raised when runtime configuration is invalid."""
 
@@ -506,7 +512,7 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> tuple[str, ...]:
-        return tuple(x.strip().rstrip("/") for x in self.cors_allow_origins.split(",") if x.strip())
+        return tuple(x.rstrip("/") for x in csv_list(self.cors_allow_origins))
 
     def _validate_cors(self) -> None:
         for origin in self.cors_origins:
@@ -518,11 +524,11 @@ class Settings(BaseSettings):
 
     @property
     def url_schemes(self) -> tuple[str, ...]:
-        return tuple(x.strip().lower() for x in self.url_ingest_schemes.split(",") if x.strip())
+        return tuple(csv_list(self.url_ingest_schemes, lower=True))
 
     @property
     def url_s3_buckets(self) -> tuple[str, ...]:
-        names = tuple(x.strip() for x in self.url_ingest_s3_buckets.split(",") if x.strip())
+        names = tuple(csv_list(self.url_ingest_s3_buckets))
         return names or ((self.s3_bucket,) if self.s3_bucket else ())
 
     @property
