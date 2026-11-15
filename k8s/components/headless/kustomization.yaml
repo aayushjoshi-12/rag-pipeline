@@ -1,0 +1,21 @@
+# Optional: "API only". Removes the dashboard (frontend Deployment + Service) so only the API,
+# workers and their stores run. Add under `components:` in an overlay; do not combine with an
+# overlay that patches or routes to rag-pipeline-frontend (the prod overlay does) - use
+# overlays/headless or copy the prod HPA/limits into your own overlay.
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target: {kind: Deployment, name: rag-pipeline-frontend}
+    patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rag-pipeline-frontend
+  - target: {kind: Service, name: rag-pipeline-frontend}
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: rag-pipeline-frontend

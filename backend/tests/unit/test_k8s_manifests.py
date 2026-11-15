@@ -174,3 +174,17 @@ def test_kind_overlay_is_self_consistent() -> None:
         for c in tpl["spec"]["containers"]:
             if c["image"].startswith("rag-pipeline/"):
                 assert c["image"].endswith(":kind"), name
+
+
+def test_headless_overlay_has_no_dashboard_and_routes_the_ingress_to_the_api() -> None:
+    docs = render("headless")
+    assert not [d for d in docs if "frontend" in d["metadata"]["name"]]
+    api = by_kind(docs, "Deployment")
+    assert {"rag-pipeline-api", "rag-pipeline-worker", "rag-pipeline-beat"} <= set(api)
+    backends = [
+        p["backend"]["service"]["name"]
+        for ing in by_kind(docs, "Ingress").values()
+        for rule in ing["spec"]["rules"]
+        for p in rule["http"]["paths"]
+    ]
+    assert backends == ["rag-pipeline-api"] and "rag-pipeline-api" in by_kind(docs, "Service")

@@ -7,6 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"examples": [{"email": "you@example.com", "password": "correct horse"}]}
+    )
+
     email: str
     password: str
 

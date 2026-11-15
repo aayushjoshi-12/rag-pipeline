@@ -11,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -31,6 +31,7 @@ from app.schema.documents import (
     ChunkOut,
     DocumentDetail,
     DocumentOut,
+    DocumentPage,
     FromUrlRequest,
     JobOut,
     UploadResponse,
@@ -49,6 +50,10 @@ from app.services.vectorstore import VectorStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+#: ``GET /v1/documents`` (paginated envelope). Mounted only under /v1.
+v1_router = APIRouter()
+#: ``GET /documents`` (historic bare array). Mounted only as the deprecated unversioned alias.
+legacy_router = APIRouter()
 
 # Browsers/clients disagree on markdown and generic types, so the extension is authoritative;
 # the declared content type only has to be plausible.
@@ -143,7 +148,7 @@ async def _enqueue_job(
     return JobOut.model_validate(refreshed or job)
 
 
-@router.post("/documents", response_model=UploadResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))])
+@router.post("/documents", summary="Upload a document and queue ingestion", response_model=UploadResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))])
 async def upload_document(
     file: UploadFile,
     session: Session,
@@ -239,7 +244,7 @@ async def ingest_from_url(
     return UploadResponse(document=DocumentOut.model_validate(doc), job=JobOut.model_validate(refreshed or job))
 
 
-@router.put("/documents/{document_id}", response_model=UploadResponse, dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))])
+@router.put("/documents/{document_id}", summary="Replace a document with a new version", response_model=UploadResponse, dependencies=[Depends(require(Permission.DOCUMENTS_WRITE))])
 async def replace_document(
     document_id: uuid.UUID,
     file: UploadFile,
@@ -269,14 +274,42 @@ async def replace_document(
     return UploadResponse(document=DocumentOut.model_validate(doc), job=job)
 
 
-@router.get("/documents", response_model=list[DocumentOut], dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
+@v1_router.get(
+    "/documents",
+    response_model=DocumentPage,
+    summary="List documents (paginated)",
+    dependencies=[Depends(require(Permission.DOCUMENTS_READ))],
+)
+async def list_documents_page(
+    session: Session,
+    limit: Annotated[int, Query(ge=1, le=500, description="Page size.")] = 50,
+    offset: Annotated[int, Query(ge=0, description="Documents to skip.")] = 0,
+) -> DocumentPage:
+    """Documents, newest first, as `{items, total, limit, offset, has_more}`.
+
+    Page through with `offset += limit` until `has_more` is false. Out-of-range `limit`/`offset`
+    is a `422` (never silently clamped).
+    """
+    docs = await ops.list_documents(skip=offset, limit=limit, session=session)
+    total = await ops.count_documents(session=session)
+    return DocumentPage(
+        items=[DocumentOut.model_validate(d) for d in docs],
+        total=total,
+        limit=limit,
+        offset=offset,
+        has_more=offset + len(docs) < total,
+    )
+
+
+@legacy_router.get("/documents", response_model=list[DocumentOut], dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
 async def list_documents(session: Session, skip: int = 0, limit: int = 100) -> list[DocumentOut]:
+    """Deprecated: unversioned bare-array list used by the dashboard. Use `GET /v1/documents`."""
     limit = max(1, min(limit, 500))
     docs = await ops.list_documents(skip=max(0, skip), limit=limit, session=session)
     return [DocumentOut.model_validate(d) for d in docs]
 
 
-@router.get("/documents/{document_id}", response_model=DocumentDetail, dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
+@router.get("/documents/{document_id}", summary="Get a document with its jobs", response_model=DocumentDetail, dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
 async def get_document(document_id: uuid.UUID, session: Session) -> DocumentDetail:
     doc = await ops.get_document(document_id, session=session)
     if doc is None:
@@ -288,7 +321,7 @@ async def get_document(document_id: uuid.UUID, session: Session) -> DocumentDeta
     )
 
 
-@router.get("/documents/{document_id}/chunks", response_model=list[ChunkOut], dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
+@router.get("/documents/{document_id}/chunks", summary="List a document's chunks", response_model=list[ChunkOut], dependencies=[Depends(require(Permission.DOCUMENTS_READ))])
 async def list_chunks(document_id: uuid.UUID, session: Session) -> list[ChunkOut]:
     if await ops.get_document(document_id, session=session) is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found.")
@@ -296,7 +329,7 @@ async def list_chunks(document_id: uuid.UUID, session: Session) -> list[ChunkOut
     return [ChunkOut(id=r.id, index=r.index, text=r.text, metadata=dict(r.metadata_)) for r in rows]
 
 
-@router.get("/jobs/{job_id}", response_model=JobOut, dependencies=[Depends(require(Permission.JOBS_READ))])
+@router.get("/jobs/{job_id}", summary="Get an ingestion job (poll for status)", response_model=JobOut, dependencies=[Depends(require(Permission.JOBS_READ))])
 async def get_job(job_id: uuid.UUID, session: Session) -> JobOut:
     job = await ops.get_job(job_id, session=session)
     if job is None:
@@ -304,7 +337,7 @@ async def get_job(job_id: uuid.UUID, session: Session) -> JobOut:
     return JobOut.model_validate(job)
 
 
-@router.delete("/documents/{document_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require(Permission.DOCUMENTS_DELETE))])
+@router.delete("/documents/{document_id}", summary="Delete a document and its vectors", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require(Permission.DOCUMENTS_DELETE))])
 async def delete_document(
     document_id: uuid.UUID,
     session: Session,

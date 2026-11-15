@@ -160,6 +160,8 @@ services:
     restart: unless-stopped
 
   frontend:
+    # Optional dashboard. `make up` enables the "ui" profile; `make up-api` (API only) does not.
+    profiles: ["ui"]
     build:
       context: ./frontend
     container_name: rag-pipeline-frontend

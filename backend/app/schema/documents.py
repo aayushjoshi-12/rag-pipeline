@@ -59,6 +59,19 @@ class FromUrlRequest(BaseModel):
     )
 
 
+class DocumentPage(BaseModel):
+    """One page of documents, newest first. `GET /v1/documents` returns this envelope."""
+
+    items: list[DocumentOut]
+    total: int = Field(description="Number of documents in total (all pages).", examples=[137])
+    limit: int = Field(description="Page size that was applied.", examples=[50])
+    offset: int = Field(description="Number of documents skipped.", examples=[0])
+    has_more: bool = Field(
+        description="True when `offset + len(items) < total`: request the next page with "
+        "`offset = offset + limit`."
+    )
+
+
 class UploadResponse(BaseModel):
     document: DocumentOut
     job: JobOut

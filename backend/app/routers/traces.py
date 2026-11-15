@@ -22,7 +22,7 @@ def _check(value: str | None, allowed: tuple[str, ...], name: str) -> None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, f"{name} must be one of {allowed}")
 
 
-@router.get("/traces", response_model=TracePage)
+@router.get("/traces", response_model=TracePage, summary="List traces (paginated)")
 async def list_traces(
     session: Session,
     kind: str | None = None,

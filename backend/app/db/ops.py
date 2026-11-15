@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Sequence
 from contextlib import AsyncExitStack
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import async_session as _default_session
@@ -66,9 +66,18 @@ async def list_documents(
     async with AsyncExitStack() as stack:
         sess = await _acquire(session, stack)
         result = await sess.execute(
-            select(Document).order_by(Document.created_at.desc()).offset(skip).limit(limit)
+            select(Document)
+            .order_by(Document.created_at.desc(), Document.id.desc())  # id: stable pages on ties
+            .offset(skip)
+            .limit(limit)
         )
         return list(result.scalars().all())
+
+
+async def count_documents(*, session: AsyncSession | None = None) -> int:
+    async with AsyncExitStack() as stack:
+        sess = await _acquire(session, stack)
+        return int((await sess.execute(select(func.count()).select_from(Document))).scalar_one())
 
 
 async def update_document_status(

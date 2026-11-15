@@ -4,7 +4,7 @@
         check fmt \
         run run-backend run-frontend \
         db-up db-down migrate \
-        up down logs \
+        up up-api down logs openapi \
         deploy deploy-dry images
 
 # ── Help ──────────────────────────────────────────────────────────────────────
@@ -21,7 +21,9 @@ help:
 	@echo "  db-down        Stop db+redis+chroma"
 	@echo "  migrate        Run alembic migrations against the dev DB"
 	@echo "  up             Build + start the full compose stack"
+	@echo "  up-api         Same, but API only (no dashboard container)"
 	@echo "  down           Stop the compose stack"
+	@echo "  openapi        Re-export docs/openapi.json (refuses unacknowledged breaking changes)"
 	@echo "  logs           Tail compose logs"
 	@echo "  deploy         Build/push/apply K8s manifests (ENV=dev|prod)"
 	@echo "  deploy-dry     Dry-run the deploy step"
@@ -67,6 +69,9 @@ frontend-check:
 
 check: backend-check frontend-check
 
+openapi:
+	cd backend && uv run python -m app.openapi_contract export
+
 fmt:
 	cd backend && uv run ruff format .
 
@@ -95,10 +100,14 @@ migrate:
 
 # The compose `migrate` service runs alembic before api/worker start.
 up:
+	docker compose --profile ui up -d --build
+
+# API only (headless): no dashboard container. Same stack otherwise.
+up-api:
 	docker compose up -d --build
 
 down:
-	docker compose down
+	docker compose --profile ui down
 
 logs:
 	docker compose logs -f api worker

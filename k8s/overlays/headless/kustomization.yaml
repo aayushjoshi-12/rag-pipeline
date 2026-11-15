@@ -1,0 +1,16 @@
+# API-only deployment for vendors that bring their own UI: base minus the dashboard, with the
+# ingress routed straight to the API. Set CORS_ALLOW_ORIGINS (configmap / config.prod.json) to the
+# origin of the browser app that will call it.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+components:
+  - ../../components/headless
+
+images:
+  - name: rag-pipeline/backend
+    newTag: latest

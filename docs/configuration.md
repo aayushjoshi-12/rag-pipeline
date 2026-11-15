@@ -340,6 +340,15 @@ API keys need **no new settings**: they are stored in Postgres (`api_keys`, migr
 See [`docs/api.md`](./api.md#authentication-for-services-api-keys) for the security model and a curl/Python recipe.
 <!-- ===== end Ticket 35 ===== -->
 
+## CORS
+
+| Key | Values | Default | Scope | Meaning |
+|---|---|---|---|---|
+| `CORS_ALLOW_ORIGINS` | comma separated origins (`https://app.example.com`, scheme + host[:port], no path) or `*` | empty | startup (restart) | Browser origins allowed to call the API. Empty = no CORS headers at all (same-origin and non-browser clients only). An invalid entry fails at startup. |
+
+Credentials are never allowed cross-origin (auth is by header), and the allowed methods/headers are fixed; see
+[`docs/api.md`](./api.md#cors-browser-clients). The dashboard container proxies `/api`-style calls itself, so it does not need this.
+
 ## Query cache
 
 Three layers in the existing Redis (own db, keys under `rag:cache:v1:`), all **fail-open**: with Redis down, slow or full

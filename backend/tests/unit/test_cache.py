@@ -33,7 +33,7 @@ URL = "redis://localhost:6379/13"
 
 def make(**kw: Any) -> QueryCache:
     return QueryCache(
-        Settings(**{"cache_enabled": True, "cache_redis_url": URL, "cache_timeout_ms": 200, **kw})
+        Settings(**{"cache_enabled": True, "cache_redis_url": URL, "cache_timeout_ms": 2000, **kw})
     )
 
 

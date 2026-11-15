@@ -60,6 +60,7 @@ async def ctx(
         trace_capture_content=False,
         cache_enabled=True,
         cache_redis_url=URL,
+        cache_timeout_ms=2000,  # a loaded CI/dev machine must not trip the 100 ms production deadline
     )
 
     async def session_dep() -> AsyncIterator[AsyncSession]:

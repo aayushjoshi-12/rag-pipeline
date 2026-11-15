@@ -192,6 +192,9 @@ class Settings(BaseSettings):
     #: First-admin bootstrap (only used when no users exist yet).
     admin_email: str = ""
     admin_password: str = ""
+    #: Browser origins allowed to call the API cross-origin (comma separated, or ``*``). Empty (default)
+    #: = no CORS headers at all: only same-origin and non-browser clients. ticket 36.
+    cors_allow_origins: str = ""
     data_dir: Path = Path("data")
     max_upload_size_bytes: int = 25 * 1024 * 1024
     cleanup_orphan_age_hours: float = 24.0
@@ -379,6 +382,7 @@ class Settings(BaseSettings):
         self._validate_retrieval()
         self._validate_storage()
         self._validate_cache()
+        self._validate_cors()
         for name in ("llm_price_input_per_mtok", "llm_price_output_per_mtok"):
             price = getattr(self, name)
             if price is not None and price < 0:
@@ -395,6 +399,18 @@ class Settings(BaseSettings):
         if not (256 <= self.parser_max_completion_tokens <= 32000):
             raise SettingsError("parser_max_completion_tokens must be within 256..32000.")
         return self
+
+    @property
+    def cors_origins(self) -> tuple[str, ...]:
+        return tuple(x.strip().rstrip("/") for x in self.cors_allow_origins.split(",") if x.strip())
+
+    def _validate_cors(self) -> None:
+        for origin in self.cors_origins:
+            if origin != "*" and not re.fullmatch(r"https?://[^/\s]+", origin):
+                raise SettingsError(
+                    f"CORS_ALLOW_ORIGINS entry '{origin}' must be '*' or an origin like "
+                    "https://app.example.com (scheme + host[:port], no path)."
+                )
 
     @property
     def url_schemes(self) -> tuple[str, ...]:

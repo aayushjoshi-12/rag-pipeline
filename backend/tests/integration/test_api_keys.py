@@ -23,7 +23,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 from tests.integration.test_auth_api import ALL, FAKE_ID, Env, env  # noqa: F401  (imported fixture)
 
-ERR_BODY = {"detail": "invalid or expired API key"}
+ERR_BODY = {"detail": "invalid or expired API key", "code": "unauthorized"}
+
+
+def err_body(r: httpx.Response) -> dict[str, Any]:
+    """The error body minus the per-request ``request_id`` (which legitimately differs every call)."""
+    body = dict(r.json())
+    assert body.pop("request_id") == r.headers["x-request-id"]
+    return body
 
 
 class Fx:
@@ -250,9 +257,9 @@ async def test_every_key_failure_is_the_same_401(fx: Fx) -> None:
         for hdr in (xkey(value), bearer(value) if value.startswith("rag_") else xkey(value)):
             r = await fx.c.get("/documents", headers=hdr)
             assert r.status_code == 401, (name, r.status_code, r.text)
-            assert r.json() == ERR_BODY, name
+            assert err_body(r) == ERR_BODY, name
             assert r.headers["www-authenticate"] == "Bearer"
-            seen.append((r.status_code, r.text, r.headers["www-authenticate"]))
+            seen.append((r.status_code, str(err_body(r)), r.headers["www-authenticate"]))
     assert len(set(seen)) == 1  # byte-identical: no oracle
     # and the good key still works (the failures changed nothing)
     assert (await fx.c.post("/search", headers=xkey(full), json={})).status_code not in (401, 403)
@@ -315,7 +322,7 @@ async def test_revocation_applies_immediately_even_from_another_session(fx: Fx) 
     await apikeys.revoke(other, row)
     await other.close()
     r = await fx.c.get("/documents", headers=xkey(created["key"]))
-    assert r.status_code == 401 and r.json() == ERR_BODY
+    assert r.status_code == 401 and err_body(r) == ERR_BODY
 
 
 async def test_expiry_applies_immediately(fx: Fx) -> None:
@@ -378,7 +385,7 @@ async def test_header_precedence_and_cross_use(fx: Fx) -> None:
     # a JWT in X-API-Key is NOT accepted; a JWT in Authorization still is
     token = jwt["Authorization"].split(" ", 1)[1]
     r = await c.get("/documents", headers=xkey(token))
-    assert r.status_code == 401 and r.json() == ERR_BODY
+    assert r.status_code == 401 and err_body(r) == ERR_BODY
     assert (await c.get("/documents", headers=jwt)).status_code == 200
     # two keys: X-API-Key's permissions apply, Authorization is ignored
     both = {**xkey(search["key"]), **bearer(docs["key"])}
@@ -478,9 +485,9 @@ async def test_openapi_documents_api_key_security(fx: Fx) -> None:
     assert schemes["ApiKeyAuth"]["type"] == "apiKey" and schemes["ApiKeyAuth"]["name"] == "X-API-Key"
     assert schemes["ApiKeyAuth"]["in"] == "header"
     assert any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes.values())
-    for path, methods in (("/api-keys", {"get", "post"}), ("/api-keys/{key_id}/revoke", {"post"})):
+    for path, methods in (("/v1/api-keys", {"get", "post"}), ("/v1/api-keys/{key_id}/revoke", {"post"})):
         assert methods <= set(spec["paths"][path])
-    assert "ApiKeyAuth" in str(spec["paths"]["/search"]["post"]["security"])
+    assert "ApiKeyAuth" in str(spec["paths"]["/v1/search"]["post"]["security"])
     out = spec["components"]["schemas"]["ApiKeyOut"]["properties"]
     assert "key" not in out and "secret_hash" not in out
     assert "key" in spec["components"]["schemas"]["ApiKeyCreated"]["properties"]

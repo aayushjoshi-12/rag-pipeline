@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rag-pipeline
+  namespace: rag-pipeline
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: 30m
+spec:
+  # ingressClassName: nginx   # set to your cluster's class
+  rules:
+    - host: api.example.com   # replace
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rag-pipeline-api
+                port:
+                  number: 80

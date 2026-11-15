@@ -3,10 +3,19 @@ from __future__ import annotations
 import uuid
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatRequest(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {"question": "What is the minimum credit score for a conventional loan?", "top_k": 5},
+                {"question": "late fees on a conforming loan", "mode": "hybrid", "neighbors": 1},
+            ]
+        }
+    )
+
     question: str = Field(min_length=1, max_length=4000)
     document_ids: list[uuid.UUID] | None = None
     top_k: int | None = Field(default=None, ge=1, le=50)

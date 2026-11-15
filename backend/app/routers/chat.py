@@ -33,7 +33,7 @@ logger = structlog.get_logger(__name__)
 router = APIRouter()
 
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, summary="Ask a question (retrieval-augmented answer with sources)")
 async def chat(
     req: ChatRequest,
     request: Request,

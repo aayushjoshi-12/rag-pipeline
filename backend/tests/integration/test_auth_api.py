@@ -133,7 +133,7 @@ async def test_login_failures_are_indistinguishable(env: Env) -> None:
     wrong_pw = await env.client.post("/auth/login", json={"email": email, "password": "wrong-password"})
     unknown = await env.client.post("/auth/login", json={"email": "ghost@example.test", "password": PASSWORD})
     assert wrong_pw.status_code == unknown.status_code == 401
-    assert wrong_pw.json() == unknown.json()
+    assert {**wrong_pw.json(), "request_id": ""} == {**unknown.json(), "request_id": ""}  # ids differ per call
     assert "password" not in wrong_pw.text.lower().replace("invalid credentials", "")
 
 

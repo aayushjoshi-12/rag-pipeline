@@ -232,7 +232,7 @@ async def test_validation_and_broker_failure(api: Any, server: str) -> None:
 
 
 def test_openapi_documents_the_endpoint() -> None:
-    op = app.openapi()["paths"]["/documents/from-url"]["post"]
+    op = app.openapi()["paths"]["/v1/documents/from-url"]["post"]
     assert ("worker" in op["description"] and "NEW" in op["description"]) or "new" in op["description"]
     assert {"201", "400", "401", "403", "422", "503"} <= set(op["responses"])
     schema = app.openapi()["components"]["schemas"]["FromUrlRequest"]["properties"]["url"]
