@@ -2071,3 +2071,81 @@ input.switch:checked::after {
     grid-column: 1 / -1;
   }
 }
+/* ───────────────────────── modal dialog, secret box (API keys) ───────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: var(--s-4);
+  background: light-dark(rgb(24 24 27 / 40%), rgb(0 0 0 / 65%));
+}
+.modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+  width: min(34rem, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: var(--s-5);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
+}
+.modal:focus {
+  outline: none;
+}
+.modal-title {
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+.modal-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s-3);
+}
+.secret-box {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-2) var(--s-2) var(--s-3);
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r);
+}
+.secret-value {
+  flex: 1;
+  min-width: 0;
+  font: 0.8125rem/1.4 var(--mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+.cell-mono {
+  font-family: var(--mono);
+  font-size: 0.8125rem;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+.badge-active {
+  background: color-mix(in srgb, var(--good) 13%, var(--surface));
+  border-color: color-mix(in srgb, var(--good) 35%, var(--surface));
+}
+.badge-active .icon {
+  color: var(--good);
+}
+.badge-revoked,
+.badge-expired {
+  background: var(--surface-2);
+  color: var(--ink-2);
+}
+.badge-revoked .icon,
+.badge-expired .icon {
+  color: var(--ink-3);
+}

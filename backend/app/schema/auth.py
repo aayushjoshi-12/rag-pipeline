@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -67,6 +68,49 @@ class UserUpdate(BaseModel):
 class PermissionOut(BaseModel):
     name: str
     description: str
+
+
+class ApiKeyCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=64, description="A label for the client, e.g. `billing-service`.")
+    role_id: uuid.UUID = Field(description="The role whose permissions the key gets (read on every request).")
+    expires_in_days: int | None = Field(
+        default=None, ge=1, le=3650, description="Omit for a key that never expires."
+    )
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "name": "billing-service",
+                    "role_id": "0d1c0a2e-5f67-4b0c-9a3e-7a1d5c1f2b10",
+                    "expires_in_days": 90,
+                }
+            ]
+        }
+    )
+
+
+class ApiKeyOut(BaseModel):
+    """A key as listed: never contains the secret."""
+
+    id: uuid.UUID
+    name: str
+    prefix: str = Field(description="Public part of the key, safe to show; identifies it in lists and logs.")
+    role_id: uuid.UUID
+    role: str
+    owner_email: str
+    created_at: datetime
+    expires_at: datetime | None
+    last_used_at: datetime | None = Field(description="Updated at most once per minute.")
+    revoked_at: datetime | None
+    status: str = Field(description="`active`, `expired` or `revoked`.")
+
+
+class ApiKeyCreated(ApiKeyOut):
+    """Returned once, by POST /api-keys. ``key`` is the only time the secret is available."""
+
+    key: str = Field(description="The full API key. Store it now: it cannot be retrieved again.")
+    warnings: list[str] = Field(default_factory=list)
 
 
 class MeOut(BaseModel):

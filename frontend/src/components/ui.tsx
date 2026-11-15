@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
 import { Icon, type IconName } from './Icon'
 
 /** Page title row: h1, one-line description, primary action(s) on the right. */
@@ -192,7 +192,7 @@ export function Tabs({
     onChange(t.id)
     refs.current[(i + tabs.length) % tabs.length]?.focus()
   }
-  const onKeyDown = (i: number) => (e: KeyboardEvent) => {
+  const onKeyDown = (i: number) => (e: ReactKeyboardEvent) => {
     if (e.key === 'ArrowRight') go(i + 1)
     else if (e.key === 'ArrowLeft') go(i - 1)
     else if (e.key === 'Home') go(0)
@@ -229,6 +229,64 @@ export function TabPanel({ id, children }: { id: string; children: ReactNode }) 
   return (
     <div role="tabpanel" id={`panel-${id}`} aria-labelledby={`tab-${id}`} className="tab-panel">
       {children}
+    </div>
+  )
+}
+
+/** Modal dialog. Not dismissable by backdrop click; Escape does nothing unless `onEscape` is given
+ * (used for one-time secrets: the caller closes it from an explicit button). Focus moves into the
+ * dialog, is kept there while open, and returns to the opener on close. */
+export function Dialog({
+  title,
+  children,
+  footer,
+  onEscape,
+}: {
+  title: string
+  children: ReactNode
+  footer: ReactNode
+  onEscape?: () => void
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    const previous = document.activeElement as HTMLElement | null
+    el?.focus()
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onEscape?.()
+      if (e.key !== 'Tab' || !el) return
+      const focusable = el.querySelectorAll<HTMLElement>('button, input, select, a[href]')
+      if (focusable.length === 0) return
+      const first = focusable[0]!
+      const last = focusable[focusable.length - 1]!
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === el)) {
+        e.preventDefault()
+        last.focus()
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      previous?.focus?.()
+    }
+  }, [onEscape])
+  return (
+    <div className="modal-backdrop">
+      <div
+        ref={ref}
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        tabIndex={-1}
+      >
+        <h2 className="modal-title">{title}</h2>
+        <div className="modal-body">{children}</div>
+        <div className="modal-foot">{footer}</div>
+      </div>
     </div>
   )
 }

@@ -12,7 +12,7 @@ from sqlalchemy import text
 from app.config import Settings
 from app.db.engine import async_session, engine
 from app.observability import configure_for_server
-from app.routers import auth, chat, documents, health, search, traces
+from app.routers import api_keys, auth, chat, documents, health, search, traces
 from app.services import keyword, observability, retriever
 from app.services.auth import accounts
 from app.services.langfuse import configure_from_settings
@@ -84,6 +84,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="rag-pipeline", version="0.1.0", lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(api_keys.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(search.router)

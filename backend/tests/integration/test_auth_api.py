@@ -49,6 +49,9 @@ GUARDED: list[tuple[str, str, Permission]] = [
     ("PATCH", f"/roles/{FAKE_ID}", Permission.ROLES_MANAGE),
     ("DELETE", f"/roles/{FAKE_ID}", Permission.ROLES_MANAGE),
     ("GET", "/permissions", Permission.ROLES_MANAGE),
+    ("GET", "/api-keys", Permission.APIKEYS_MANAGE),
+    ("POST", "/api-keys", Permission.APIKEYS_MANAGE),
+    ("POST", f"/api-keys/{FAKE_ID}/revoke", Permission.APIKEYS_MANAGE),
 ]
 
 

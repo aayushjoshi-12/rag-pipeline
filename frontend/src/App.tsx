@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from 'react-router-dom'
 import { Icon, type IconName } from './components/Icon'
 import { RequirePermission } from './components/RequirePermission'
 import ChatPage from './pages/ChatPage'
+import ApiKeysPage from './pages/ApiKeysPage'
 import DocumentDetailPage from './pages/DocumentDetailPage'
 import DocumentsPage from './pages/DocumentsPage'
 import LoginPage from './pages/LoginPage'
@@ -40,6 +41,7 @@ function Shell() {
   const canTraces = useCan('traces:read')
   const canUsers = useCan('users:manage')
   const canRoles = useCan('roles:manage')
+  const canKeys = useCan('apikeys:manage')
   const [open, setOpen] = useState(false)
 
   return (
@@ -84,9 +86,10 @@ function Shell() {
               <NavItem to="/usage" icon="usage" label="Usage" />
             </>
           )}
-          {(canUsers || canRoles) && <div className="nav-group">Admin</div>}
+          {(canUsers || canRoles || canKeys) && <div className="nav-group">Admin</div>}
           {canUsers && <NavItem to="/users" icon="users" label="Users" />}
           {canRoles && <NavItem to="/roles" icon="roles" label="Roles" />}
+          {canKeys && <NavItem to="/api-keys" icon="key" label="API keys" />}
         </nav>
         <div className="sidebar-foot">
           {me?.auth_enabled ? (
@@ -159,6 +162,14 @@ function Shell() {
               element={
                 <RequirePermission permission="users:manage">
                   <UsersPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/api-keys"
+              element={
+                <RequirePermission permission="apikeys:manage">
+                  <ApiKeysPage />
                 </RequirePermission>
               }
             />

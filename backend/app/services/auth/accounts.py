@@ -8,10 +8,10 @@ from __future__ import annotations
 import uuid
 from collections.abc import Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import Role, RolePermission, User, UserRole
+from app.db.models import ApiKey, Role, RolePermission, User, UserRole
 from app.services.auth.passwords import hash_password
 from app.services.auth.permissions import (
     ADMIN_ROLE,
@@ -249,6 +249,17 @@ async def delete_role(session: AsyncSession, role: Role) -> None:
     ).scalar_one()
     if in_use:
         raise ConflictError(f"role is assigned to {in_use} user(s)")
+    live_keys = (
+        await session.execute(
+            select(func.count())
+            .select_from(ApiKey)
+            .where(ApiKey.role_id == role.id, ApiKey.revoked_at.is_(None))
+        )
+    ).scalar_one()
+    if live_keys:
+        raise ConflictError(f"role is used by {live_keys} API key(s); revoke them first")
+    # Revoked keys keep a RESTRICT foreign key to the role; they are dead, so they go with it.
+    await session.execute(delete(ApiKey).where(ApiKey.role_id == role.id))
     await session.delete(role)
     await session.commit()
 

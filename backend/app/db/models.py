@@ -195,3 +195,29 @@ class Trace(Base):
     #: The question text; stored only when TRACE_CAPTURE_CONTENT is on.
     question: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta: Mapped[dict[str, object]] = mapped_column(JSON, default=dict)
+
+
+class ApiKey(Base):
+    """A non-interactive credential for a machine client (migration 0008).
+
+    Only the SHA-256 of the secret is stored; the full key is shown once at creation. Permissions are NOT
+    stored on the key: they are read from the bound role on every request.
+    """
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_new_uuid)
+    name: Mapped[str] = mapped_column(String(64))
+    prefix: Mapped[str] = mapped_column(String(16), unique=True, index=True)
+    secret_hash: Mapped[str] = mapped_column(String(64))
+    owner_user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    role_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("roles.id", ondelete="RESTRICT"), index=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now(), default=_utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(nullable=True)
+
+    owner: Mapped[User] = relationship(lazy="joined")
+    role: Mapped[Role] = relationship(lazy="joined")

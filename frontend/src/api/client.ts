@@ -1,4 +1,7 @@
 import type {
+  ApiKey,
+  ApiKeyCreated,
+  ApiKeyCreateInput,
   ChatRequest,
   ChatResponse,
   Chunk,
@@ -146,6 +149,10 @@ export const api = {
   updateUser: (id: string, input: UserUpdateInput) =>
     request<ManagedUser>(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(input) }),
   deleteUser: (id: string) => request<void>(`/users/${id}`, { method: 'DELETE' }),
+  listApiKeys: () => request<ApiKey[]>('/api-keys'),
+  createApiKey: (input: ApiKeyCreateInput) =>
+    request<ApiKeyCreated>('/api-keys', { method: 'POST', body: JSON.stringify(input) }),
+  revokeApiKey: (id: string) => request<ApiKey>(`/api-keys/${id}/revoke`, { method: 'POST' }),
   listRoles: () => request<Role[]>('/roles'),
   createRole: (input: RoleInput) =>
     request<Role>('/roles', { method: 'POST', body: JSON.stringify(input) }),

@@ -93,6 +93,7 @@ All routes except `/health` and `/auth/login|refresh` need a bearer token with t
 | GET | `/auth/me` | who am I + effective permissions |
 | GET | `/traces`, `/traces/{id}`, `/usage` | request/ingest trace log and per-day aggregates (`traces:read`) |
 | GET/POST/PATCH/DELETE | `/users`, `/roles` (`GET /permissions`) | admin: manage users, roles and their permissions (`users:manage`, `roles:manage`) |
+| POST/GET | `/api-keys`, `/api-keys/{id}/revoke` | admin (`apikeys:manage`): create (secret shown once), list, revoke API keys for machine clients, sent as `X-API-Key` or `Bearer` ([docs/api.md](docs/api.md#authentication-for-services-api-keys)) |
 | POST | `/documents` | multipart upload → `{document, job}` (413 over the size limit, 415 for bad types) |
 | GET | `/documents`, `/documents/{id}`, `/documents/{id}/chunks` | list / detail with jobs / indexed chunks |
 | PUT | `/documents/{id}` | upload a new version; only changed chunks are re-embedded |

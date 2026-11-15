@@ -155,6 +155,32 @@ export interface UserUpdateInput {
   role_ids?: string[]
 }
 
+export interface ApiKey {
+  id: string
+  name: string
+  prefix: string
+  role_id: string
+  role: string
+  owner_email: string
+  created_at: string
+  expires_at: string | null
+  last_used_at: string | null
+  revoked_at: string | null
+  status: 'active' | 'expired' | 'revoked'
+}
+
+/** Returned once by POST /api-keys: `key` is the only time the secret is available. */
+export interface ApiKeyCreated extends ApiKey {
+  key: string
+  warnings: string[]
+}
+
+export interface ApiKeyCreateInput {
+  name: string
+  role_id: string
+  expires_in_days?: number
+}
+
 export interface PermissionInfo {
   name: string
   description: string

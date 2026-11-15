@@ -321,3 +321,21 @@ Each chat trace stores `cost_usd` (USD). **Unknown is `NULL`, never 0**: the das
 - `GET /usage/credits` (needs `traces:read`) reads the OpenRouter key balance (`GET /key`) server-side, caches it 60 s, and returns `available: false` with a reason for other providers, a missing key or an unreachable endpoint. The API key is never returned.
 - `GET /usage/insights?days=&kind=` returns the aggregates behind the Usage tabs (cost by model, latency histogram, error reasons, weekday/hour heatmap, no-hit rate, hits per query, most-cited documents, chunk reuse, ingest duration by mode). Chat traces store the ids (never the text) of the documents an answer was grounded on in `meta.cited_document_ids`.
 <!-- end ticket 32 -->
+
+<!-- ===== Ticket 35: API keys ===== -->
+
+## API keys (service accounts)
+
+API keys need **no new settings**: they are stored in Postgres (`api_keys`, migration `0009`) and are available whenever
+`AUTH_ENABLED=true`. They are managed at runtime (dashboard Admin > API keys, or `/api-keys`), not through config.
+
+| Aspect | Value | Scope | Meaning |
+|---|---|---|---|
+| Permission `apikeys:manage` | new; built-in `admin` only | deployment (RBAC) | create / list / revoke keys. Add it to a custom role in Admin > Roles if a non-admin should manage keys. |
+| Key format | `rag_<8 [a-z0-9]>_<256-bit urlsafe secret>` | fixed | not configurable |
+| `last_used_at` write interval | 60 s per key | fixed (code constant) | bounds database writes from busy clients |
+| Max `expires_in_days` | 3650 | fixed | omit for no expiry |
+| Per-key rate limit | not implemented | n/a | rate-limit at the gateway/ingress |
+
+See [`docs/api.md`](./api.md#authentication-for-services-api-keys) for the security model and a curl/Python recipe.
+<!-- ===== end Ticket 35 ===== -->

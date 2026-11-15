@@ -19,6 +19,7 @@ class Permission(StrEnum):
     TRACES_READ = "traces:read"
     USERS_MANAGE = "users:manage"
     ROLES_MANAGE = "roles:manage"
+    APIKEYS_MANAGE = "apikeys:manage"
 
 
 DESCRIPTIONS: dict[Permission, str] = {
@@ -31,6 +32,7 @@ DESCRIPTIONS: dict[Permission, str] = {
     Permission.TRACES_READ: "View request traces and usage statistics",
     Permission.USERS_MANAGE: "Create, edit and deactivate users",
     Permission.ROLES_MANAGE: "Create, edit and delete roles",
+    Permission.APIKEYS_MANAGE: "Create, list and revoke API keys",
 }
 
 ADMIN_ROLE = "admin"
@@ -59,6 +61,13 @@ BUILTIN_ROLES: dict[str, tuple[str, frozenset[Permission]]] = {
         ),
     ),
 }
+
+
+#: Never granted to an API key principal even if its role has them: a leaked machine credential must not
+#: be able to mint keys, users or roles (privilege persistence / escalation). Humans manage; keys consume.
+KEY_FORBIDDEN: frozenset[str] = frozenset(
+    {Permission.USERS_MANAGE.value, Permission.ROLES_MANAGE.value, Permission.APIKEYS_MANAGE.value}
+)
 
 
 def is_valid_permission(value: str) -> bool:

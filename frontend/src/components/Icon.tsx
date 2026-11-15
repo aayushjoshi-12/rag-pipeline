@@ -90,6 +90,12 @@ const PATHS: Record<string, ReactNode> = {
       <path d="M14 3v5h5" />
     </>
   ),
+  key: (
+    <>
+      <circle cx="8" cy="15" r="4" />
+      <path d="m11 12 9-9M16 7l3 3M14 9l2 2" />
+    </>
+  ),
   lock: (
     <>
       <rect x="5" y="10.5" width="14" height="10" rx="2" />
