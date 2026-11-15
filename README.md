@@ -59,6 +59,8 @@ Inside the containers the service hostnames (`db`, `redis`, `chroma`) and the ho
 (`host.docker.internal`) override whatever `.env` says, so the same `.env` works for host-run
 development and for Compose.
 
+No build toolchain? Run the published images instead (`docker compose -f docker-compose.image.yml up -d`); see [docs/deployment.md](docs/deployment.md).
+
 ### Without containers for the app
 
 ```bash
@@ -184,4 +186,4 @@ Smoke-test scripts and reports are kept locally under `tmp/` (gitignored); the a
 `backend/app` — `routers/` (HTTP), `services/` (parse, chunk, embed, retrieve, QA, ingest, cleanup),
 `tasks/` (Celery), `db/` (SQLAlchemy + Alembic), `schema/` (pydantic) · `frontend/src` — API client,
 zustand store, pages · `k8s/` — manifests · `docs/` — architecture, ADRs, API and config reference, benchmark ([index](docs/README.md)) · `context/` — founding
-scope. Operating rules for contributors and agents are in [CLAUDE.md](CLAUDE.md).
+scope. Contributor and agent guidance: [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md).

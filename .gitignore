@@ -32,3 +32,5 @@ node_modules/
 .pytest_cache/
 .coverage
 coverage.xml
+# Local agent rules (private)
+CLAUDE.local.md

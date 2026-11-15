@@ -4,8 +4,7 @@
 
 `rag-pipeline` is a **ready-to-go, enterprise-grade Retrieval-Augmented Generation pipeline**
 that is **scalable, customizable, and deployable in any organization or personal environment**.
-It is a personal / portfolio project meant to demonstrate the exact skills a production RAG
-engineering role asks for — which doubles as shippable, reusable infrastructure.
+It is an open-source reference implementation that doubles as shippable, reusable infrastructure.
 
 Unlike org-internal services bound to a specific tenant and deployment, `rag-pipeline` must be
 **portable**. The same code runs on a single laptop via Docker Compose and

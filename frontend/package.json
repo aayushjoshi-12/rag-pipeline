@@ -1,6 +1,8 @@
 {
   "name": "rag-pipeline-dashboard",
   "private": true,
+  "license": "MIT",
+  "author": "Aayush Joshi",
   "version": "0.1.0",
   "type": "module",
   "scripts": {

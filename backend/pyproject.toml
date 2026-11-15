@@ -3,6 +3,8 @@ name = "rag-pipeline-backend"
 version = "0.1.0"
 description = "Enterprise-grade, deployable RAG pipeline — FastAPI API + Celery workers (ingest → parse → chunk → embed → store → query)."
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "Aayush Joshi" }]
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
