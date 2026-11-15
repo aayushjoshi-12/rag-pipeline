@@ -5,15 +5,14 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
 import pytest
 import redis as redis_lib
 from app.config import Settings
 from app.db import ops
 from app.main import app
 from app.routers import deps
-from app.services.llm import Completion
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import FakeLLM, api_client
 from tests.integration.test_retrieval_modes import ID_QUERY, PARAPHRASE, corpus, kind  # noqa: F401
 
 URL = "redis://localhost:6379/13"
@@ -30,17 +29,6 @@ def _redis_up() -> bool:
 pytestmark = pytest.mark.skipif(not _redis_up(), reason="no Redis on localhost:6379")
 
 
-class CountingLLM:
-    model = "fake"
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def complete(self, system: str, user: str) -> Completion:
-        self.calls += 1
-        return Completion(f"answer {self.calls} [1]", 3, 2)
-
-
 @pytest.fixture
 async def ctx(
     corpus: dict[str, Any],  # noqa: F811 (fixture imported above)
@@ -52,7 +40,7 @@ async def ctx(
     monkeypatch.setenv("CACHE_REDIS_URL", URL)
     monkeypatch.setattr("app.services.cache._process_settings", None)
     redis_lib.Redis.from_url(URL).flushdb()
-    llm = CountingLLM()
+    llm = FakeLLM("answer {n} [1]", usage=(3, 2), cost=None)
     settings = Settings(
         default_top_k=3,
         auth_enabled=False,
@@ -63,22 +51,17 @@ async def ctx(
         cache_timeout_ms=2000,  # a loaded CI/dev machine must not trip the 100 ms production deadline
     )
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: settings
-    app.dependency_overrides[deps.get_embedder_dep] = lambda: corpus["emb"]
-    app.dependency_overrides[deps.get_store] = lambda: corpus["store"]
-    app.dependency_overrides[deps.get_llm_dep] = lambda: llm
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://t"
-        ) as c:
+    async with api_client(
+        db_session,
+        settings=lambda: settings,
+        embedder_dep=lambda: corpus["emb"],
+        store=lambda: corpus["store"],
+        llm_dep=lambda: llm,
+    ) as c:
+        try:
             yield {"c": c, "llm": llm, "corpus": corpus, "settings": settings}
-    finally:
-        app.dependency_overrides.clear()
-        redis_lib.Redis.from_url(URL).flushdb()
+        finally:
+            redis_lib.Redis.from_url(URL).flushdb()
 
 
 def strip(body: dict[str, Any]) -> dict[str, Any]:

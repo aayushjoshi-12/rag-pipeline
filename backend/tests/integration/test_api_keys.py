@@ -6,7 +6,6 @@ import hashlib
 import itertools
 import logging
 import uuid
-from collections.abc import AsyncIterator
 from datetime import timedelta
 from typing import Any
 
@@ -21,6 +20,7 @@ from fastapi import HTTPException
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+from tests.fakes import api_client
 from tests.integration.test_auth_api import ALL, FAKE_ID, Env, env  # noqa: F401  (imported fixture)
 
 ERR_BODY = {"detail": "invalid or expired API key", "code": "unauthorized"}
@@ -166,18 +166,12 @@ async def test_admin_role_is_allowed_but_warned_and_still_cannot_manage(fx: Fx) 
 async def test_auth_disabled_cannot_create_keys(tmp_path: Any, isolated_session: AsyncSession) -> None:
     from app.config import Settings
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield isolated_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: Settings(auth_enabled=False, data_dir=tmp_path)
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            assert (await c.get("/api-keys")).status_code == 200  # anonymous holds every permission
-            r = await c.post("/api-keys", json={"name": "x", "role_id": FAKE_ID})
-            assert r.status_code == 409 and "AUTH_ENABLED" in r.json()["detail"]
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        isolated_session, settings=lambda: Settings(auth_enabled=False, data_dir=tmp_path)
+    ) as c:
+        assert (await c.get("/api-keys")).status_code == 200  # anonymous holds every permission
+        r = await c.post("/api-keys", json={"name": "x", "role_id": FAKE_ID})
+        assert r.status_code == 409 and "AUTH_ENABLED" in r.json()["detail"]
 
 
 # ── permission matrix for a retrieval-only key ───────────────────────────────

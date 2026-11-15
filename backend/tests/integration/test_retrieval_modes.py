@@ -19,12 +19,10 @@ import pytest
 from app.config import Settings
 from app.db import ops
 from app.db.models import Trace
-from app.main import app
-from app.routers import deps
-from app.services.llm import Completion
 from app.services.retriever import ChunkResult, RetrievalOptions, retrieve
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import FakeLLM, api_client
 from tests.vector_helpers import real_store
 
 GROUPS = [
@@ -46,13 +44,6 @@ class ConceptEmbedder:
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self.embed_query(t) for t in texts]
-
-
-class FakeLLM:
-    model = "fake"
-
-    def complete(self, system: str, user: str) -> Completion:
-        return Completion("ok [1]", 1, 1)
 
 
 POLICY = [
@@ -231,21 +222,16 @@ async def test_distance_scores_are_real_cosine_distances(corpus: dict[str, Any])
 # ── the /chat API: overrides, validation, trace metadata ─────────────────────────────────
 @pytest.fixture
 async def chat(corpus: dict[str, Any], db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: Settings(
-        default_top_k=3, auth_enabled=False, retrieval_neighbors=0, trace_capture_content=False
-    )
-    app.dependency_overrides[deps.get_embedder_dep] = lambda: corpus["emb"]
-    app.dependency_overrides[deps.get_store] = lambda: corpus["store"]
-    app.dependency_overrides[deps.get_llm_dep] = lambda: FakeLLM()
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            yield c
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        db_session,
+        settings=lambda: Settings(
+            default_top_k=3, auth_enabled=False, retrieval_neighbors=0, trace_capture_content=False
+        ),
+        embedder_dep=lambda: corpus["emb"],
+        store=lambda: corpus["store"],
+        llm_dep=lambda: FakeLLM("ok [1]", usage=(1, 1), cost=None),
+    ) as c:
+        yield c
 
 
 async def last_trace_meta(session: AsyncSession) -> dict[str, Any]:

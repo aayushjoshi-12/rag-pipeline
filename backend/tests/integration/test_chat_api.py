@@ -6,80 +6,25 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
 import pytest
 from app.config import Settings
 from app.db import ops
 from app.main import app
 from app.routers import deps
 from app.services import traces
-from app.services.llm import Completion, LLMRequestError, LLMUnavailableError
+from app.services.llm import LLMRequestError, LLMUnavailableError
 from app.services.retriever import RetrievalOptions, retrieve
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
-class FakeEmbedder:
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        return [[1.0] for _ in texts]
-
-    def embed_query(self, text: str) -> list[float]:
-        return [1.0]
-
-
-class FakeStore:
-    def __init__(self, hits: list[dict[str, Any]]) -> None:
-        self.hits = hits
-        self.last_filters: dict[str, Any] | None = "unset"  # type: ignore[assignment]
-        self.last_k = 0
-
-    def add_chunks(self, *a: Any) -> None: ...
-
-    def similarity_search(
-        self, query_embedding: list[float], top_k: int = 5, filters: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
-        self.last_filters, self.last_k = filters, top_k
-        return self.hits
-
-    def delete_doc(self, doc_id: str) -> None: ...
-
-    def reset(self) -> None: ...
-
-
-class FakeLLM:
-    model = "fake"
-
-    def __init__(self, exc: Exception | None = None) -> None:
-        self.exc = exc
-        self.prompts: list[str] = []
-
-    def complete(self, system: str, user: str) -> Completion:
-        if self.exc:
-            raise self.exc
-        self.prompts.append(user)
-        return Completion("The answer is 42 [1].", 120, 9, 0.0123)
-
-
-def _hit(doc_id: uuid.UUID, index: int, text: str, score: float = 0.2) -> dict[str, Any]:
-    return {
-        "id": f"{doc_id}_{index}",
-        "score": score,
-        "text": text,
-        "metadata": {"doc_id": str(doc_id), "index": index},
-    }
-
-
-async def _doc(session: AsyncSession, name: str = "report.pdf") -> uuid.UUID:
-    d = await ops.create_document(filename=name, content_type="application/pdf", session=session)
-    return d.id
+from tests.fakes import FakeEmbedder, FakeLLM, HitStore, api_client, hit, make_doc
 
 
 async def test_retrieve_enriches_filename_and_skips_deleted_docs(db_session: AsyncSession) -> None:
-    real = await _doc(db_session)
+    real = await make_doc(db_session)
     ghost = uuid.uuid4()
-    store = FakeStore(
+    store = HitStore(
         [
-            _hit(real, 2, "kept"),
-            _hit(ghost, 0, "orphan"),
+            hit(real, 2, "kept"),
+            hit(ghost, 0, "orphan"),
             {"id": "x", "text": "bad", "metadata": {}},
         ]
     )
@@ -88,8 +33,8 @@ async def test_retrieve_enriches_filename_and_skips_deleted_docs(db_session: Asy
 
 
 async def test_retrieve_builds_doc_filters(db_session: AsyncSession) -> None:
-    a, b = await _doc(db_session), await _doc(db_session)
-    store = FakeStore([])
+    a, b = await make_doc(db_session), await make_doc(db_session)
+    store = HitStore([])
     await retrieve("q", top_k=3, embedder=FakeEmbedder(), store=store, session=db_session)
     # de-duplication on (default): the store is asked for the candidate pool, the result is cut to top_k
     assert store.last_filters is None and store.last_k == 50
@@ -113,29 +58,21 @@ async def test_retrieve_builds_doc_filters(db_session: AsyncSession) -> None:
 
 @pytest.fixture
 async def chat_client(db_session: AsyncSession) -> AsyncIterator[Any]:
-    state: dict[str, Any] = {"store": FakeStore([]), "llm": FakeLLM()}
-
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: Settings(default_top_k=4, auth_enabled=False)
-    app.dependency_overrides[deps.get_embedder_dep] = lambda: FakeEmbedder()
-    app.dependency_overrides[deps.get_store] = lambda: state["store"]
-    app.dependency_overrides[deps.get_llm_dep] = lambda: state["llm"]
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://t"
-        ) as c:
-            yield c, state
-    finally:
-        app.dependency_overrides.clear()
+    state: dict[str, Any] = {"store": HitStore([]), "llm": FakeLLM()}
+    async with api_client(
+        db_session,
+        settings=lambda: Settings(default_top_k=4, auth_enabled=False),
+        embedder_dep=lambda: FakeEmbedder(),
+        store=lambda: state["store"],
+        llm_dep=lambda: state["llm"],
+    ) as c:
+        yield c, state
 
 
 async def test_chat_returns_answer_with_sources(chat_client: Any, db_session: AsyncSession) -> None:
     c, state = chat_client
-    doc = await _doc(db_session, "facts.pdf")
-    state["store"] = FakeStore([_hit(doc, 1, "Life is 42.")])
+    doc = await make_doc(db_session, "facts.pdf")
+    state["store"] = HitStore([hit(doc, 1, "Life is 42.")])
     r = await c.post("/chat", json={"question": "What is life?"})
     assert r.status_code == 200, r.text
     body = r.json()
@@ -157,7 +94,7 @@ async def test_chat_passes_document_filter_and_top_k(
     chat_client: Any, db_session: AsyncSession
 ) -> None:
     c, state = chat_client
-    d = await _doc(db_session)
+    d = await make_doc(db_session)
     await c.post("/chat", json={"question": "q", "document_ids": [str(d)], "top_k": 9})
     assert state["store"].last_filters == {"doc_id": str(d)} and state["store"].last_k == 50
 
@@ -169,9 +106,9 @@ async def test_chat_maps_llm_errors(
     chat_client: Any, db_session: AsyncSession, exc: Exception, code: int
 ) -> None:
     c, state = chat_client
-    doc = await _doc(db_session)
-    state["store"] = FakeStore([_hit(doc, 0, "t")])
-    state["llm"] = FakeLLM(exc)
+    doc = await make_doc(db_session)
+    state["store"] = HitStore([hit(doc, 0, "t")])
+    state["llm"] = FakeLLM(exc=exc)
     r = await c.post("/chat", json={"question": "q"})
     assert r.status_code == code
 
@@ -184,15 +121,15 @@ async def test_chat_without_configured_llm_is_503_only_when_needed(
     assert (
         await c.post("/chat", json={"question": "q"})
     ).status_code == 200  # no context -> no LLM needed
-    doc = await _doc(db_session)
-    state["store"] = FakeStore([_hit(doc, 0, "t")])
+    doc = await make_doc(db_session)
+    state["store"] = HitStore([hit(doc, 0, "t")])
     assert (await c.post("/chat", json={"question": "q"})).status_code == 503
 
 
 async def test_chat_retrieval_failure_is_503(chat_client: Any) -> None:
     c, state = chat_client
 
-    class Boom(FakeStore):
+    class Boom(HitStore):
         def similarity_search(self, *a: Any, **k: Any) -> list[dict[str, Any]]:
             raise ConnectionError("chroma down")
 
@@ -226,8 +163,8 @@ async def test_successful_chat_records_a_trace_with_tokens_model_and_hits(
     chat_client: Any, db_session: AsyncSession
 ) -> None:
     c, state = chat_client
-    doc = await _doc(db_session, "facts.pdf")
-    state["store"] = FakeStore([_hit(doc, 1, "Life is 42."), _hit(doc, 2, "More.")])
+    doc = await make_doc(db_session, "facts.pdf")
+    state["store"] = HitStore([hit(doc, 1, "Life is 42."), hit(doc, 2, "More.")])
     before = len(await _traces(db_session))
     assert (await c.post("/chat", json={"question": "What is life?"})).status_code == 200
     rows = await _traces(db_session)
@@ -264,9 +201,9 @@ async def test_failed_chat_records_an_error_trace_and_still_returns_the_error(
     chat_client: Any, db_session: AsyncSession
 ) -> None:
     c, state = chat_client
-    doc = await _doc(db_session)
-    state["store"] = FakeStore([_hit(doc, 0, "text")])
-    state["llm"] = FakeLLM(LLMUnavailableError("LLM provider returned 429"))
+    doc = await make_doc(db_session)
+    state["store"] = HitStore([hit(doc, 0, "text")])
+    state["llm"] = FakeLLM(exc=LLMUnavailableError("LLM provider returned 429"))
     r = await c.post("/chat", json={"question": "q"})
     assert r.status_code == 503
     t = (await _traces(db_session))[0]
@@ -296,9 +233,9 @@ async def test_chat_neighbors_adds_context_and_marks_hits(
     chat_client: Any, db_session: AsyncSession
 ) -> None:
     c, state = chat_client
-    doc = await _doc(db_session, "rules.pdf")
+    doc = await make_doc(db_session, "rules.pdf")
     await _chunks(db_session, doc, 6)
-    state["store"] = FakeStore([_hit(doc, 3, "chunk-3")])
+    state["store"] = HitStore([hit(doc, 3, "chunk-3")])
     r = await c.post("/chat", json={"question": "q", "neighbors": 1})
     assert r.status_code == 200, r.text
     srcs = r.json()["sources"]
@@ -312,9 +249,9 @@ async def test_chat_default_is_hits_only_and_setting_applies(
     chat_client: Any, db_session: AsyncSession
 ) -> None:
     c, state = chat_client
-    doc = await _doc(db_session)
+    doc = await make_doc(db_session)
     await _chunks(db_session, doc, 6)
-    state["store"] = FakeStore([_hit(doc, 3, "chunk-3")])
+    state["store"] = HitStore([hit(doc, 3, "chunk-3")])
     app.dependency_overrides[deps.get_settings] = lambda: Settings(auth_enabled=False, retrieval_neighbors=0)
     srcs = (await c.post("/chat", json={"question": "q"})).json()["sources"]
     assert [s["chunk_index"] for s in srcs] == [3] and srcs[0]["is_hit"] is True

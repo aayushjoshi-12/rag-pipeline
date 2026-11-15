@@ -22,6 +22,7 @@ from app.services.llm import (
 from app.services.qa import NO_CONTEXT_ANSWER, SYSTEM_PROMPT, answer_question, build_user_prompt
 from app.services.retriever import ChunkResult
 from httpx import Response
+from tests.fakes import FakeLLM
 
 URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -158,25 +159,14 @@ def test_prompt_caps_context_but_keeps_first_chunk() -> None:
     assert "SECOND_MARKER" not in p
 
 
-class _FakeLLM:
-    model = "fake"
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def complete(self, system: str, user: str) -> Completion:
-        self.calls += 1
-        return Completion("  grounded answer [1]  ", 11, 5)
-
-
 async def test_answer_skips_llm_without_context() -> None:
-    llm = _FakeLLM()
+    llm = FakeLLM("  grounded answer [1]  ", usage=(11, 5), cost=None)
     out = await answer_question("q", [], llm)
     assert out.answer == NO_CONTEXT_ANSWER and out.sources == [] and llm.calls == 0
 
 
 async def test_answer_returns_stripped_text_and_sources() -> None:
-    out = await answer_question("q", [_chunk()], _FakeLLM())
+    out = await answer_question("q", [_chunk()], FakeLLM("  grounded answer [1]  ", usage=(11, 5), cost=None))
     assert out.answer == "grounded answer [1]" and len(out.sources) == 1
     assert (out.prompt_tokens, out.completion_tokens) == (11, 5)
 

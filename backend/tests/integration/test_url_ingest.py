@@ -22,7 +22,7 @@ from app.services.ingestion import ingest_document
 from app.services.parser import ParseResult
 from app.services.storage import LocalStorage
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.fakes import FakeEmbedder, FakeStore
+from tests.fakes import FakeEmbedder, FakeStore, api_client, make_settings
 
 TEXT = (" ".join(f"loopback{i}" for i in range(300))).encode()
 
@@ -86,7 +86,7 @@ class Harness:
 
 def _cfg(tmp_path: Path, **kw: Any) -> Settings:
     kw.setdefault("max_upload_size_bytes", 100_000)
-    return Settings(data_dir=tmp_path, auth_enabled=False, **kw)
+    return make_settings(data_dir=tmp_path, **kw)
 
 
 @pytest.fixture
@@ -101,17 +101,10 @@ async def api(
         h.enqueued.append((job_id, url))
         return f"task-{len(h.enqueued)}"
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_enqueue_url] = lambda: enqueue_url
-    app.dependency_overrides[deps.get_store] = lambda: FakeStore()
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            yield c, h, tmp_path
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        db_session, enqueue_url=lambda: enqueue_url, store=lambda: FakeStore()
+    ) as c:
+        yield c, h, tmp_path
 
 
 def _use(cfg: Settings) -> None:

@@ -16,13 +16,13 @@ import httpx
 import pytest
 from app.config import Settings
 from app.db.models import AppSetting, SettingsAudit
-from app.main import app
 from app.routers import deps
 from app.services import runtime_settings as rt
 from app.services.auth.permissions import KEY_FORBIDDEN, Permission
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+from tests.fakes import api_client
 from tests.integration.test_auth_api import PASSWORD, Env  # noqa: F401  (shared helper class)
 
 ENC_KEY = "k" * 48
@@ -79,22 +79,15 @@ async def env(
     rt.configure(async_sessionmaker(engine, expire_on_commit=False))
     fake = Fake()
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield isolated_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_enqueue_reindex] = fake.enqueue
-    app.dependency_overrides[deps.get_task_status] = fake.status
     try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://t"
+        async with api_client(
+            isolated_session, enqueue_reindex=fake.enqueue, task_status=fake.status
         ) as c:
             e = Env(c, isolated_session)
             e.fake = fake  # type: ignore[attr-defined]
             e.url = isolated_db_url  # type: ignore[attr-defined]
             yield e
     finally:
-        app.dependency_overrides.clear()
         rt.reset_for_tests()
         await engine.dispose()
 

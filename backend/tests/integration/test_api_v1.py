@@ -11,10 +11,9 @@ import pytest
 from app.config import Settings
 from app.db import ops
 from app.db.models import Document
-from app.main import app
-from app.routers import deps
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import api_client
 
 N = 7
 
@@ -23,18 +22,8 @@ N = 7
 async def client(db_session: AsyncSession, tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     cfg = Settings(data_dir=tmp_path, auth_enabled=False)
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: cfg
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://t"
-        ) as c:
-            yield c
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(db_session, settings=lambda: cfg) as c:
+        yield c
 
 
 @pytest.fixture

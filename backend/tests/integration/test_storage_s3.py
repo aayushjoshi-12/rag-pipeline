@@ -19,7 +19,7 @@ from app.services.parser import ParseResult
 from app.services.storage import S3Storage, StorageError, key_dir, new_key
 from sqlalchemy.ext.asyncio import AsyncSession
 from tests.conftest import s3_settings
-from tests.fakes import FakeEmbedder, FakeStore
+from tests.fakes import FakeEmbedder, FakeStore, api_client
 
 
 def _file(tmp_path: Path, content: bytes = b"hello s3 " * 50, name: str = "f.txt") -> Path:
@@ -188,24 +188,14 @@ async def test_ingest_without_the_link_fails_cleanly(db_session: AsyncSession, t
 
 @pytest.fixture
 async def s3_api(s3_bucket: str, db_session: AsyncSession) -> Any:
-    import httpx
-    from app.main import app
-    from app.routers import deps
-
     cfg = s3_settings(s3_bucket, s3_prefix="api/", max_upload_size_bytes=10_000)
-
-    async def session_dep() -> Any:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: cfg
-    app.dependency_overrides[deps.get_enqueue] = lambda: (lambda job_id: "t")
-    app.dependency_overrides[deps.get_store] = lambda: FakeStore()
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            yield c, S3Storage(cfg), cfg
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        db_session,
+        settings=lambda: cfg,
+        enqueue=lambda: (lambda job_id: "t"),
+        store=lambda: FakeStore(),
+    ) as c:
+        yield c, S3Storage(cfg), cfg
 
 
 async def test_api_upload_replace_delete_on_s3(s3_api: Any, db_session: AsyncSession) -> None:

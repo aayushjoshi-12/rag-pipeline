@@ -3,23 +3,20 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 import structlog
 from app.config import Settings
 from app.db import ops
-from app.main import app
-from app.routers import deps
 from app.services import observability
 from app.services.ingestion import ingest_document
-from app.services.llm import Completion
 from app.services.parser import ParseResult
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import FakeLLM, api_client
 
 TEXT = " ".join(f"word{i}" for i in range(400))
 
@@ -116,13 +113,6 @@ async def test_context_does_not_leak_after_ingest(db_session: AsyncSession, tmp_
     assert structlog.contextvars.get_contextvars() == {}
 
 
-class LLM:
-    model = "fake"
-
-    def complete(self, system: str, user: str) -> Completion:
-        return Completion("answer", 7, 3)
-
-
 async def test_chat_emits_spans(db_session: AsyncSession, rec: Recorder) -> None:
     doc = await ops.create_document(filename="f.pdf", content_type="application/pdf", session=db_session)
 
@@ -130,19 +120,14 @@ async def test_chat_emits_spans(db_session: AsyncSession, rec: Recorder) -> None
         def similarity_search(self, *a: Any, **k: Any) -> list[dict[str, Any]]:
             return [{"id": "x", "score": 0.1, "text": "t", "metadata": {"doc_id": str(doc.id), "index": 0}}]
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: Settings(auth_enabled=False)
-    app.dependency_overrides[deps.get_embedder_dep] = lambda: Embedder()
-    app.dependency_overrides[deps.get_store] = lambda: Store()
-    app.dependency_overrides[deps.get_llm_dep] = lambda: LLM()
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            r = await c.post("/chat", json={"question": "q?"})
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        db_session,
+        settings=lambda: Settings(auth_enabled=False),
+        embedder_dep=lambda: Embedder(),
+        store=lambda: Store(),
+        llm_dep=lambda: FakeLLM("answer", usage=(7, 3), cost=None),
+    ) as c:
+        r = await c.post("/chat", json={"question": "q?"})
     assert r.status_code == 200
     assert rec.names == ["chat.request", "chat.retrieve", "chat.context", "chat.answer"]
     assert dict(rec.spans[0][1])["top_k"] == Settings().default_top_k

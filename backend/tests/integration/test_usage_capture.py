@@ -14,16 +14,18 @@ from app.services.ingestion import ingest_document
 from app.services.llm import LLMUnavailableError, Usage
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.fakes import FakeEmbedder, FakeStore, MeteredEmbedder
-from tests.integration.test_chat_api import (
+from tests.fakes import (
+    FakeEmbedder,
     FakeLLM,
-    _doc,
-    _hit,
-    chat_client,  # noqa: F401  (imported fixture)
-)
-from tests.integration.test_chat_api import FakeStore as ChatStore
-from tests.integration.test_chat_stream_api import (  # noqa: F401  (imported fixtures)
+    FakeStore,
+    HitStore,
+    MeteredEmbedder,
     StreamLLM,
+    hit,
+    make_doc,
+)
+from tests.integration.test_chat_api import chat_client  # noqa: F401  (imported fixture)
+from tests.integration.test_chat_stream_api import (  # noqa: F401  (imported fixtures)
     _trace,
     _with_doc,
     cctx,
@@ -50,9 +52,9 @@ async def test_failed_chat_keeps_the_usage_the_provider_reported(
     chat_client: Any, db_session: AsyncSession  # noqa: F811
 ) -> None:
     c, state = chat_client
-    doc = await _doc(db_session)
-    state["store"] = ChatStore([_hit(doc, 0, "text")])
-    state["llm"] = FakeLLM(LLMUnavailableError("LLM ran out of output tokens", usage=FAILED_USAGE))
+    doc = await make_doc(db_session)
+    state["store"] = HitStore([hit(doc, 0, "text")])
+    state["llm"] = FakeLLM(exc=LLMUnavailableError("LLM ran out of output tokens", usage=FAILED_USAGE))
     assert (await c.post("/chat", json={"question": "q"})).status_code == 503
     t = await _last(db_session, "chat")
     assert t.status == "error"
@@ -63,9 +65,9 @@ async def test_failed_chat_without_usage_stays_unknown(
     chat_client: Any, db_session: AsyncSession  # noqa: F811
 ) -> None:
     c, state = chat_client
-    doc = await _doc(db_session)
-    state["store"] = ChatStore([_hit(doc, 0, "text")])
-    state["llm"] = FakeLLM(LLMUnavailableError("429"))
+    doc = await make_doc(db_session)
+    state["store"] = HitStore([hit(doc, 0, "text")])
+    state["llm"] = FakeLLM(exc=LLMUnavailableError("429"))
     await c.post("/chat", json={"question": "q"})
     t = await _last(db_session, "chat")
     assert (t.prompt_tokens, t.completion_tokens, t.cost_usd) == (None, None, None)

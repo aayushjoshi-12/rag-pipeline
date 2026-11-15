@@ -12,30 +12,8 @@ import pytest
 from app.config import Settings
 from app.db import ops
 from app.db.enums import JobStatus
-from app.main import app
-from app.routers import deps
 from sqlalchemy.ext.asyncio import AsyncSession
-
-
-class FakeStore:
-    def __init__(self) -> None:
-        self.deleted: list[str] = []
-
-    def add_chunks(
-        self, doc_id: str, chunks: list[dict[str, Any]], embeddings: list[list[float]]
-    ) -> None:
-        pass
-
-    def similarity_search(
-        self, query_embedding: list[float], top_k: int = 5, filters: dict[str, Any] | None = None
-    ) -> list[dict[str, Any]]:
-        return []
-
-    def delete_doc(self, doc_id: str) -> None:
-        self.deleted.append(doc_id)
-
-    def reset(self) -> None:
-        pass
+from tests.fakes import FakeStore, api_client
 
 
 class Harness:
@@ -58,20 +36,10 @@ async def client(
         h.enqueued.append(job_id)
         return f"task-{len(h.enqueued)}"
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: cfg
-    app.dependency_overrides[deps.get_enqueue] = lambda: enqueue
-    app.dependency_overrides[deps.get_store] = lambda: h.store
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://t"
-        ) as c:
-            yield c, h, tmp_path
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        db_session, settings=lambda: cfg, enqueue=lambda: enqueue, store=lambda: h.store
+    ) as c:
+        yield c, h, tmp_path
 
 
 async def _upload(

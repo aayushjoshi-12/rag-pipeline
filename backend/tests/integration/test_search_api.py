@@ -24,6 +24,7 @@ from app.services.auth.permissions import BUILTIN_ROLES, Permission
 from app.services.retriever import RetrievalOptions, retrieve
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import FakeLLM, api_client
 
 # fixtures + data of the retrieval-mode suite (pytest discovers imported fixtures by name)
 from tests.integration.test_retrieval_modes import (  # noqa: F401  (imported fixtures)
@@ -39,47 +40,33 @@ MODES = ("semantic", "keyword", "hybrid")
 BACKEND = Path(__file__).resolve().parents[2]
 
 
-class ExplodingLLM:
+def _exploding_llm() -> FakeLLM:
     """Any use of the LLM during /search is a bug."""
-
-    model = "boom"
-
-    def complete(self, system: str, user: str) -> Any:
-        raise AssertionError("the LLM must not be called by /search")
+    return FakeLLM(exc=AssertionError("the LLM must not be called by /search"), model="boom")
 
 
-class ChatLLM:
-    model = "fake"
-
-    def complete(self, system: str, user: str) -> Any:
-        from app.services.llm import Completion
-
-        return Completion("ok [1]", 1, 1)
+def _chat_llm() -> FakeLLM:
+    return FakeLLM("ok [1]", usage=(1, 1), cost=None)
 
 
 @pytest.fixture
 async def api(corpus: dict[str, Any], db_session: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:  # noqa: F811
     llm_calls: list[str] = []
 
-    def llm_dep() -> ExplodingLLM:
+    def llm_dep() -> FakeLLM:
         llm_calls.append("resolved")
-        return ExplodingLLM()
+        return _exploding_llm()
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: Settings(
-        default_top_k=3, auth_enabled=False, retrieval_neighbors=0, trace_capture_content=False
-    )
-    app.dependency_overrides[deps.get_embedder_dep] = lambda: corpus["emb"]
-    app.dependency_overrides[deps.get_store] = lambda: corpus["store"]
-    app.dependency_overrides[deps.get_llm_dep] = llm_dep
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            yield c
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        db_session,
+        settings=lambda: Settings(
+            default_top_k=3, auth_enabled=False, retrieval_neighbors=0, trace_capture_content=False
+        ),
+        embedder_dep=lambda: corpus["emb"],
+        store=lambda: corpus["store"],
+        llm_dep=llm_dep,
+    ) as c:
+        yield c
     assert llm_calls == [], "/search resolved the LLM dependency"
 
 
@@ -107,7 +94,7 @@ async def test_search_equals_the_retriever_and_chat_order(
     assert body["fusion"] == ("rrf" if mode == "hybrid" else None)
     assert body["took_ms"] >= 0 and body["top_k"] == 4 and body["neighbors"] == 0
     # /chat uses the same path: same passages in the same order
-    app.dependency_overrides[deps.get_llm_dep] = lambda: ChatLLM()
+    app.dependency_overrides[deps.get_llm_dep] = lambda: _chat_llm()
     chat = await api.post("/chat", json={"question": query, "mode": mode, "top_k": 4, "neighbors": 0})
     assert chat.status_code == 200, chat.text
     assert keys(chat.json()["sources"]) == keys(body["results"])
@@ -196,7 +183,7 @@ async def test_results_never_contain_context_chunks_and_default_is_no_context(ap
 async def test_chat_context_chunks_are_unscored_and_point_at_their_hit(
     api: httpx.AsyncClient, corpus: dict[str, Any]  # noqa: F811
 ) -> None:
-    app.dependency_overrides[deps.get_llm_dep] = lambda: ChatLLM()
+    app.dependency_overrides[deps.get_llm_dep] = lambda: _chat_llm()
     pol = str(corpus["ids"]["policy.pdf"])
     r = await api.post("/chat", json={"question": "insurance deductibles warehouse fires", "mode": "keyword", "top_k": 1, "neighbors": 1, "document_ids": [pol]})
     src = r.json()["sources"]
@@ -213,7 +200,7 @@ async def test_chat_context_chunks_are_unscored_and_point_at_their_hit(
 async def test_chat_hybrid_context_chunk_does_not_borrow_the_hits_ranks(
     api: httpx.AsyncClient, corpus: dict[str, Any]  # noqa: F811
 ) -> None:
-    app.dependency_overrides[deps.get_llm_dep] = lambda: ChatLLM()
+    app.dependency_overrides[deps.get_llm_dep] = lambda: _chat_llm()
     r = await api.post("/chat", json={"question": ID_QUERY, "mode": "hybrid", "top_k": 2, "neighbors": 1})
     src = r.json()["sources"]
     hits = [s for s in src if s["is_hit"]]
@@ -309,7 +296,7 @@ async def test_keyword_index_mismatch_is_503_with_the_fix(api: httpx.AsyncClient
     # identical to /chat's behaviour for the same failure
     kw.keyword_search = boom  # type: ignore[assignment]
     try:
-        app.dependency_overrides[deps.get_llm_dep] = lambda: ChatLLM()
+        app.dependency_overrides[deps.get_llm_dep] = lambda: _chat_llm()
         c = await api.post("/chat", json={"question": "q", "mode": "keyword"})
     finally:
         kw.keyword_search = original

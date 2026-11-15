@@ -7,75 +7,22 @@ from __future__ import annotations
 
 import asyncio
 import json
-import threading
-import time
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from typing import Any
 
-import httpx
 import pytest
 import redis as redis_lib
 from app.config import Settings
 from app.db.models import Trace
 from app.main import app
-from app.routers import deps
 from app.services.llm import Completion, LLMRequestError, LLMUnavailableError
 from app.services.qa import NO_CONTEXT_ANSWER, answer_key
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from tests.integration.test_chat_api import FakeEmbedder, FakeStore, _doc, _hit
+from tests.fakes import FakeEmbedder, HitStore, StreamLLM, api_client, hit, make_doc, make_settings
 
 REDIS_URL = "redis://localhost:6379/13"
-
-
-class StreamLLM:
-    """Scripted streaming LLM. ``fail_after`` raises that exception after N deltas; ``delay`` paces deltas."""
-
-    model = "fake-stream"
-
-    def __init__(
-        self,
-        deltas: tuple[str, ...] = ("The answer ", "is 42 ", "[1]."),
-        exc: Exception | None = None,
-        fail_after: int | None = None,
-        delay: float = 0.0,
-        cost: float | None = 0.0123,
-    ) -> None:
-        self.deltas, self.exc, self.fail_after, self.delay, self.cost = (
-            deltas,
-            exc,
-            fail_after,
-            delay,
-            cost,
-        )
-        self.calls = 0
-        self.prompts: list[str] = []
-        self.closed = threading.Event()
-        self.emitted = 0
-
-    def complete(
-        self, system: str, user: str
-    ) -> Completion:  # pragma: no cover - streaming path only
-        raise AssertionError("the streaming endpoint must not use complete()")
-
-    def stream(self, system: str, user: str) -> Iterator[str | Completion]:
-        self.calls += 1
-        self.prompts.append(user)
-        try:
-            if self.exc is not None and self.fail_after is None:
-                raise self.exc
-            for i, d in enumerate(self.deltas):
-                if self.fail_after is not None and i == self.fail_after:
-                    assert self.exc is not None
-                    raise self.exc
-                if self.delay:
-                    time.sleep(self.delay)
-                self.emitted += 1
-                yield d
-            yield Completion("".join(self.deltas) + "  ", 120, 9, self.cost)
-        finally:
-            self.closed.set()
 
 
 def parse_sse(raw: str) -> list[tuple[str, dict[str, Any]]]:
@@ -93,39 +40,32 @@ def names(events: list[tuple[str, dict[str, Any]]]) -> list[str]:
 
 
 def _settings(**kw: Any) -> Settings:
-    return Settings(default_top_k=4, auth_enabled=False, trace_capture_content=False, **kw)
+    return make_settings(default_top_k=4, trace_capture_content=False, **kw)
 
 
 @pytest.fixture
 async def sctx(db_session: AsyncSession) -> AsyncIterator[dict[str, Any]]:
     state: dict[str, Any] = {
-        "store": FakeStore([]),
+        "store": HitStore([]),
         "llm": StreamLLM(),
         "settings": _settings(),
         "session": db_session,
     }
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield db_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: state["settings"]
-    app.dependency_overrides[deps.get_embedder_dep] = lambda: FakeEmbedder()
-    app.dependency_overrides[deps.get_store] = lambda: state["store"]
-    app.dependency_overrides[deps.get_llm_dep] = lambda: state["llm"]
-    try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://t"
-        ) as c:
-            state["c"] = c
-            yield state
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(
+        db_session,
+        settings=lambda: state["settings"],
+        embedder_dep=lambda: FakeEmbedder(),
+        store=lambda: state["store"],
+        llm_dep=lambda: state["llm"],
+    ) as c:
+        state["c"] = c
+        yield state
 
 
 async def _with_doc(s: dict[str, Any], text: str = "Life is 42.") -> uuid.UUID:
-    doc = await _doc(s["session"], "facts.pdf")
-    s["store"] = FakeStore([_hit(doc, 1, text)])
+    doc = await make_doc(s["session"], "facts.pdf")
+    s["store"] = HitStore([hit(doc, 1, text)])
     return doc
 
 
@@ -218,7 +158,7 @@ async def test_validation_error_is_a_plain_422(sctx: dict[str, Any]) -> None:
 
 
 async def test_retrieval_failure_is_a_plain_http_error_and_traced(sctx: dict[str, Any]) -> None:
-    class Broken(FakeStore):
+    class Broken(HitStore):
         def similarity_search(self, *a: Any, **k: Any) -> list[dict[str, Any]]:
             raise RuntimeError("index exploded")
 

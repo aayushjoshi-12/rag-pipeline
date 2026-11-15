@@ -15,6 +15,7 @@ from app.routers import deps
 from app.services.auth import accounts
 from app.services.auth.permissions import Permission
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import api_client
 
 PASSWORD = "correct-horse-battery"
 SECRET = "s" * 48
@@ -88,16 +89,8 @@ async def env(
     await accounts.seed(isolated_session)
     cfg = Settings(secret_key=SECRET, auth_enabled=True, data_dir=tmp_path)
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield isolated_session
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: cfg
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-            yield Env(c, isolated_session)
-    finally:
-        app.dependency_overrides.clear()
+    async with api_client(isolated_session, settings=lambda: cfg) as c:
+        yield Env(c, isolated_session)
 
 
 @pytest.mark.parametrize(("method", "path", "perm"), GUARDED, ids=lambda v: str(v))

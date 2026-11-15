@@ -11,7 +11,6 @@ import httpx
 import pytest
 import respx
 from app.config import Settings
-from app.db import ops
 from app.db.models import Document, Trace
 from app.main import app
 from app.routers import deps
@@ -19,6 +18,7 @@ from app.services import credits, traces, usage_insights
 from app.services.usage_insights import nice_step, normalize_error
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
+from tests.fakes import api_client, make_doc, make_settings
 
 
 def _now() -> datetime:
@@ -177,10 +177,6 @@ async def test_heatmap_weekday_is_monday_zero(clean: AsyncSession) -> None:
 # ── insights: RAG health ────────────────────────────────────────────────────
 
 
-async def _doc(s: AsyncSession, name: str) -> uuid.UUID:
-    return (await ops.create_document(filename=name, content_type="application/pdf", session=s)).id
-
-
 async def test_no_hit_rate_and_hits_histogram(clean: AsyncSession) -> None:
     for hits in (0, 0, 1, 3, 3, 5):
         await _add(clean, hits=hits)
@@ -196,7 +192,7 @@ async def test_no_hit_rate_and_hits_histogram(clean: AsyncSession) -> None:
 
 
 async def test_most_cited_documents_never_cited_and_deleted_docs(clean: AsyncSession) -> None:
-    a, b, c = await _doc(clean, "a.pdf"), await _doc(clean, "b.pdf"), await _doc(clean, "never.pdf")
+    a, b, c = await make_doc(clean, "a.pdf"), await make_doc(clean, "b.pdf"), await make_doc(clean, "never.pdf")
     ghost = uuid.uuid4()
     for ids in ([a, b], [a], [a, ghost], [b]):
         await _add(clean, meta={"cited_document_ids": [str(i) for i in ids]})
@@ -213,7 +209,7 @@ async def test_most_cited_documents_never_cited_and_deleted_docs(clean: AsyncSes
 
 
 async def test_top_documents_are_capped_at_ten(clean: AsyncSession) -> None:
-    ids = [await _doc(clean, f"d{i}.pdf") for i in range(12)]
+    ids = [await make_doc(clean, f"d{i}.pdf") for i in range(12)]
     await _add(clean, meta={"cited_document_ids": [str(i) for i in ids]})
     out = await usage_insights.insights(clean, days=7)
     assert len(out.top_documents) == 10 and out.cited_documents == 12 and out.never_cited == 0
@@ -265,28 +261,22 @@ SECRET = "sk-or-v1-supersecretvalue"
 
 
 def _cfg(**kw: Any) -> Settings:
-    return Settings(auth_enabled=False, openrouter_api_key=SECRET, **kw)
+    return make_settings(openrouter_api_key=SECRET, **kw)
 
 
 @pytest.fixture
 async def api(clean: AsyncSession) -> AsyncIterator[httpx.AsyncClient]:
     credits.reset_cache()
 
-    async def session_dep() -> AsyncIterator[AsyncSession]:
-        yield clean
-
-    app.dependency_overrides[deps.get_session] = session_dep
-    app.dependency_overrides[deps.get_settings] = lambda: _cfg()
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+    async with api_client(clean, settings=lambda: _cfg()) as c:
+        try:
             yield c
-    finally:
-        app.dependency_overrides.clear()
-        credits.reset_cache()
+        finally:
+            credits.reset_cache()
 
 
 async def test_insights_endpoint_serialises_every_section(api: httpx.AsyncClient, clean: AsyncSession) -> None:
-    doc = await _doc(clean, "x.pdf")
+    doc = await make_doc(clean, "x.pdf")
     await _add(clean, cost_usd=0.01, model="m", hits=2, duration_ms=250, meta={"cited_document_ids": [str(doc)]})
     body = (await api.get("/usage/insights?days=7")).json()
     assert body["days"] == 7 and body["cost_usd"] == pytest.approx(0.01)
