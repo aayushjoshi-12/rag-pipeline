@@ -1,6 +1,6 @@
 # Evals for the RAG framework — brainstorm (not a decision)
 
-Status: ideas only, captured 2026-11-14 for a later ticket (27). Nothing here is built. The only
+Status: **Brainstorm, not a decision** (ticket 27 is open) — ideas only, captured 2026-11-14 for a later ticket (27). Nothing here is built. The only
 "eval" today is an ad-hoc script (`tmp/smoke_tests/search-real-world-smoke.py`, 14 hand-labelled
 questions over two real Fannie Mae chapters) — it is the seed of the golden-set idea below.
 

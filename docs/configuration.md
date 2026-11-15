@@ -59,6 +59,8 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
 
 Why these defaults: see "Parameter choice" in `docs/adr/0003-chunking.md`.
 
+Settings not tabulated here: the parser/OCR knobs (`PARSER_*`, `PDF_DPI`, `PDF_TEXT_SOURCE`, `PDF_NATIVE_MIN_CHARS`, `OCR_LANG`, `DOCX_READER`, `OPENROUTER_BASE_URL`) are described in [ADR-0002](adr/0002-document-parsing.md); provider keys, `OLLAMA_BASE_URL`, `CHROMA_HOST`/`CHROMA_PORT` (default `localhost`/`8001`), `CELERY_*`, `PORT` and `LANGFUSE_*` are in `.env.example`. Also real settings: `PARSER_MAX_COMPLETION_TOKENS` (default 16032, range 256..32000, output cap of one vision-parse call), `INCREMENTAL_MAX_CHURN` (unset; optional rebuild guard, see [the incremental-update design](design/incremental-document-update.md)), `ACCESS_TOKEN_MINUTES` (30) and `REFRESH_TOKEN_DAYS` (7) for the login token lifetimes.
+
 ## The Settings window (admin UI)
 
 Admin > **Settings** (permissions `settings:read` to view, `settings:manage` to change) edits almost every

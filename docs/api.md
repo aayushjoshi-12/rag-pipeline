@@ -100,8 +100,8 @@ use a backend-for-frontend, or a narrow `search:use`-only key behind your own ga
 ## End-to-end examples
 
 `scripts/verify_api_docs.py` executes the blocks below (each is preceded by a `verify:` marker) against a running stack, so
-they cannot silently rot: `uv run python scripts/verify_api_docs.py --api http://localhost:8000 --email you@example.com`
-(password in `$API_PASSWORD`). The blocks use the variables `API` (base URL), `EMAIL` and `PASSWORD`.
+they cannot silently rot: `cd backend && API_PASSWORD=... uv run python ../scripts/verify_api_docs.py --api http://localhost:8000 --email you@example.com`
+(add `--chat` to also run the LLM-backed block, which costs tokens). The blocks use the variables `API` (base URL), `EMAIL` and `PASSWORD`.
 
 ### curl: log in, upload, poll the job, search, delete
 
@@ -405,10 +405,10 @@ outside 0..5, malformed UUIDs, ...) is `422` and is not traced.
 ### curl
 
 ```bash
-TOKEN=$(curl -s localhost:8000/auth/login -H 'content-type: application/json' \
+TOKEN=$(curl -s localhost:8000/v1/auth/login -H 'content-type: application/json' \
   -d '{"email":"you@example.com","password":"..."}' | jq -r .access_token)
 
-curl -s localhost:8000/search -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+curl -s localhost:8000/v1/search -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"query": "waiting period after a foreclosure", "mode": "hybrid", "top_k": 3, "neighbors": 1}' | jq
 ```
 
@@ -418,10 +418,10 @@ curl -s localhost:8000/search -H "Authorization: Bearer $TOKEN" -H 'content-type
 import httpx
 
 BASE = "http://localhost:8000"
-token = httpx.post(f"{BASE}/auth/login", json={"email": "you@example.com", "password": "..."}).json()["access_token"]
+token = httpx.post(f"{BASE}/v1/auth/login", json={"email": "you@example.com", "password": "..."}).json()["access_token"]
 
 resp = httpx.post(
-    f"{BASE}/search",
+    f"{BASE}/v1/search",
     headers={"Authorization": f"Bearer {token}"},
     json={"query": "waiting period after a foreclosure", "mode": "hybrid", "top_k": 5, "neighbors": 1},
     timeout=30,
@@ -531,7 +531,7 @@ keeps the row for audit; there is no `DELETE`. A role cannot be deleted while it
 ### Recipe: a retrieval-only service account
 
 ```bash
-API=http://localhost:8000
+API=http://localhost:8000/v1
 TOKEN=$(curl -s $API/auth/login -H 'content-type: application/json' \
   -d '{"email":"admin@example.com","password":"..."}' | jq -r .access_token)
 
@@ -562,7 +562,7 @@ client = httpx.Client(
     base_url="http://localhost:8000", headers={"X-API-Key": "rag_k3j9x0aa_..."}, timeout=30
 )
 
-r = client.post("/search", json={"query": "late fees on a conforming loan", "top_k": 3})
+r = client.post("/v1/search", json={"query": "late fees on a conforming loan", "top_k": 3})
 r.raise_for_status()
 for hit in r.json()["results"]:
     print(hit["rank"], hit["filename"], hit["text"][:80])
@@ -591,7 +591,7 @@ Same request body, same permission (`chat:use`), same retrieval, same prompt and
 API cannot be used because it cannot send an `Authorization` header (and only does GET).
 
 ```bash
-curl -N -X POST http://localhost:8000/chat/stream \
+curl -N -X POST http://localhost:8000/v1/chat/stream \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"question": "What does chapter 2 say about ...?"}'
 ```

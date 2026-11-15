@@ -34,7 +34,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def pct(xs: list[float], p: float) -> float:
     s = sorted(xs)
-    return s[min(len(s) - 1, max(0, int(round(p / 100 * (len(s) - 1)))))]
+    return s[min(len(s) - 1, max(0, round(p / 100 * (len(s) - 1))))]
 
 
 def zipf_sample(n_items: int, n: int, s: float, rng: random.Random) -> list[int]:

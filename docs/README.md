@@ -7,8 +7,9 @@
 | [configuration.md](configuration.md) | Every setting, defaults, scope (deployment vs per-request), tuning notes | yes |
 | [performance.md](performance.md) | Query-cache benchmark: method, numbers, caveats, how to quote them | yes (numbers come from the JSON below) |
 | [kubernetes-local.md](kubernetes-local.md) | Running the manifests on kind | yes |
-| [adr/](adr/) | Decisions and rejected alternatives: stack, parsing, chunking, cache, API keys, runtime settings | append-only |
-| [design/](design/) | Working notes: incremental update, evals brainstorm | yes |
+| [adr/](adr/) | Decisions and rejected alternatives: stack, parsing, chunking, cache, `/v1` contract, SSE streaming, API keys, runtime settings (0001-0008) | append-only |
+| [design/incremental-document-update.md](design/incremental-document-update.md) | Design record behind ADR-0003 (content-defined chunking); shipped in ticket 15 | no (historical) |
+| [design/evals-brainstorm.md](design/evals-brainstorm.md) | Ideas only for an evals framework (ticket 27, open); nothing is built | yes (when ticket 27 starts) |
 
 ## The JSON files (generated, not prose)
 

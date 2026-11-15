@@ -1,6 +1,6 @@
 # Incremental document update (design)
 
-Status: **Design / not implemented** — grabbed before tickets 5 & 6 to pin the chunking strategy.
+Status: **Implemented (historical design record)** — written before tickets 5 & 6 to pin the chunking strategy; the update path shipped in ticket 15 (`PUT /documents/{id}`, `backend/app/services/incremental.py`). Current behaviour: [ADR-0003](../adr/0003-chunking.md) and [`configuration.md`](../configuration.md).
 
 This doc captures the brainstorming that led to the CDC decision in
 [`ADR-0003`](../adr/0003-chunking.md). Read this when building the chunker (ticket 5) and the

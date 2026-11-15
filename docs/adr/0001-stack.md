@@ -17,8 +17,8 @@ schedulers in the core).
 - **API:** FastAPI on `:8000` (async, pydantic-native, auto docs).
 - **Worker / async:** Celery with a Redis broker + result backend; beat for scheduled cleanup.
 - **Metadata store + vector index:** Postgres with `pgvector` (no SQLite).
-- **Document vector store:** ChromaDB — embedded for zero-dependency dev, switchable to a
-  server/remote Chroma for K8s (see OPEN D1).
+- **Document vector store:** ChromaDB — planned as embedded for dev and a server for K8s (see OPEN D1);
+  as built it is always the Chroma server (see the 2026-11-15 addendum).
 - **Embeddings / LLM:** pluggable (`get_embedder`, `qa.py`) — **embeddings default to local
   Ollama `mxbai-embed-large`**; chat/QA synthesis defaults to **OpenRouter** free tier
   (`nvidia/nemotron-3-ultra-550b-a55b:free`). Both multi-provider behind `EMBEDDING_PROVIDER`
@@ -60,6 +60,7 @@ replaced wholesale on every ingest and that column was a fixed `vector(1024)`. S
 ## Addendum (2026-11-15): what changed around the original stack
 
 - **File storage** is pluggable: local disk (default) or S3 (the Floci AWS emulator locally; it replaced MinIO), plus ingest from a URL or an `s3://` link. See `docs/configuration.md`.
-- **Redis also hosts the query cache** (own db 12, fail-open): [ADR-0004](0004-query-cache.md). API contract and `/v1`: [ADR-0005](0005-api-versioning-and-contract.md). Streaming chat: [ADR-0006](0006-chat-streaming-sse.md). API keys: [ADR-0007](0007-api-keys.md).
+- **Redis also hosts the query cache** (own db 12, fail-open): [ADR-0004](0004-query-cache.md). API contract and `/v1`: [ADR-0005](0005-api-versioning-and-contract.md). Streaming chat: [ADR-0006](0006-chat-streaming-sse.md). API keys: [ADR-0007](0007-api-keys.md). Admin Settings window (UI settings layer): [ADR-0008](0008-runtime-settings.md).
+- **Chroma is never embedded.** The app uses `chromadb.HttpClient` (the thin `chromadb-client` package) against the `chroma` service; no in-process Chroma mode exists.
 - **The default chat model is a configuration choice, not part of this decision.** The free `nvidia/nemotron-*:free` default named above often returns empty answers (a reasoning model spending its output budget); the model is set with `DEFAULT_LLM_MODEL`, and a tiny non-reasoning model is used when cost reporting is under test.
 

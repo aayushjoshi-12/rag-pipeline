@@ -33,7 +33,7 @@ question ─► API ─► embed query ─► Chroma similarity ─► LLM (grou
   Usage page (requests, error rate, latency and LLM tokens per day). Question text is only stored in
   traces when `TRACE_CAPTURE_CONTENT=true`; traces are purged after `TRACE_RETENTION_DAYS` (30).
 - **Access control** — JWT login with role-based access: admins define roles as sets of permissions
-  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `search:use`, `traces:read`, `users:manage`, `roles:manage`) and assign
+  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `search:use`, `traces:read`, `users:manage`, `roles:manage`, `apikeys:manage`, `cache:manage`, `settings:read|manage`) and assign
   them to users. Permissions are checked server-side on every request and re-read from the database,
   so editing a role or deactivating a user takes effect immediately.
 - **Housekeeping** — a Celery beat task removes orphaned upload directories.
@@ -47,7 +47,7 @@ Requires Docker and [Ollama](https://ollama.com) on the host (embeddings), plus 
 ollama pull mxbai-embed-large
 cp .env.example .env            # set OPENROUTER_API_KEY, SECRET_KEY, ADMIN_EMAIL, ADMIN_PASSWORD
                                 # (single-quote values containing special characters)
-docker compose up -d --build    # db, redis, chroma, migrate (one-shot), api, worker, beat, frontend
+docker compose --profile ui up -d --build   # db, redis, chroma, migrate (one-shot), api, worker, beat, frontend (= `make up`; drop `--profile ui` / use `make up-api` for no dashboard)
 ```
 
 - Dashboard: http://localhost:5173 &nbsp;·&nbsp; API docs: http://localhost:8000/docs
@@ -71,8 +71,8 @@ make run-frontend   # :5173
 
 ## Configuration
 
-Three layers, highest wins: environment variables → `config/config.<RAG_ENV>.json` → defaults
-(`backend/app/config.py`). Secrets (API keys, `DATABASE_URL`, …) live in `.env` / Kubernetes
+Three layers, highest wins: environment variables → the admin Settings window (database) → `config/config.<RAG_ENV>.json` (`backend/config/config.dev.json` for dev) → defaults
+(`backend/app/config.py`, [ADR-0008](docs/adr/0008-runtime-settings.md)). Secrets (API keys, `DATABASE_URL`, …) live in `.env` / Kubernetes
 Secrets; tunables (models, chunk size, top-k, parser knobs) are plain config. Everything is
 swappable: `LLM_PROVIDER` (openrouter | openai | anthropic), `EMBEDDING_PROVIDER` (ollama | openai),
 `PARSER_PROVIDER` (openrouter | openai | anthropic | ocr). Free-tier OpenRouter models come and go —
@@ -114,6 +114,8 @@ All routes except `/health` and `/auth/login|refresh` need a bearer token (or an
 | POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
 | POST | `/chat/stream` | same body; Server-Sent Events `sources`, `token`*, `done` / `error` ([docs/api.md](docs/api.md)) |
 | GET | `/capabilities` | server version, enabled retrieval modes, limits and features (any valid credential, no secrets) |
+| GET/PATCH | `/settings`, `/settings/audit`, `/settings/reindex`, `/settings/test/{service}` | admin Settings window: runtime defaults, write-only secrets, audit log (`settings:read` to view, `settings:manage` to change; [ADR-0008](docs/adr/0008-runtime-settings.md)) |
+| POST | `/documents/from-url` | ingest from an http(s) or `s3://` link (`documents:write`; [configuration](docs/configuration.md#file-storage-and-url-ingest)) |
 | GET/POST | `/cache/stats`, `/cache/purge` | query-cache counters and Redis keyspace (`traces:read`); purge all layers (`cache:manage`) |
 | POST | `/search` | `{query, top_k?, mode?, fusion?, neighbors?, document_ids?, include_text?}` → ranked `results[]` (no LLM; `search:use`; see [docs/api.md](docs/api.md)) |
 | GET | `/health` | db / redis / the active vector store (critical); `vector_settings` (stored index matches the configuration) and ollama (informational) |
@@ -175,7 +177,7 @@ Honest accounting of what has been exercised against real services versus only u
 | Load / scale behaviour (many workers) | 2 workers ingesting 6 documents (only one picked up tasks: tiny documents); 3 workers starved an 8 GiB Docker VM; api autoscaling measured (above) | worker throughput **not measured** |
 
 Smoke-test scripts and reports are kept locally under `tmp/` (gitignored); the automated suite
-(`make check`) runs 1,290+ backend and 240+ frontend tests with fakes for external services.
+(`make check`) runs 1,470+ backend and 320+ frontend tests with fakes for external services.
 
 ## Repository map
 

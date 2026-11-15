@@ -88,8 +88,8 @@ Distributed monorepo with these runnable pieces:
 - **`backend` Celery workers** — async consumption of the broker (Redis), running ingestion,
   parsing, embedding, and cleanup tasks.
 - **Postgres + pgvector** — metadata store for documents/chunks and the vector index. No SQLite.
-- **ChromaDB** — document vector store (embedded by default for zero-dependency dev, switchable
-  to a server/remote Chroma for K8s).
+- **ChromaDB** — document vector store, always a Chroma server (the `chroma` Compose service /
+  K8s Deployment, reached over HTTP via `chromadb-client`); `VECTOR_STORE=pgvector` is the alternative.
 - **Redis** — Celery broker + result backend.
 - **Observability** — optional Langfuse self-host (or cloud) for trace capture.
 
@@ -123,10 +123,9 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 .
 ├── CLAUDE.md
 ├── README.md
-├── Makefile                     # install / lint / typecheck / test / check / run / up / down
-├── docker-compose.yml           # full local stack: api + worker + db + redis + chroma + frontend
+├── Makefile                     # install / check / fmt / run / db-up / migrate / up / up-api / down / openapi / deploy (see `make help`)
+├── docker-compose.yml           # full local stack: api + worker + beat + migrate + db + redis + chroma (+ frontend via the `ui` profile)
 ├── .env.example                 # root env template (LLM keys, DB, Redis, broker, ports)
-├── Dockerfile                   # backend API/worker image (uv multi-stage; see backend/Dockerfile)
 │
 ├── backend/                     # Python API + Celery workers (uv-managed)
 │   ├── app/
@@ -150,7 +149,7 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │   │   │   ├── backends/        # text-extraction backends (openrouter openai anthropic ocr)
 │   │   │   ├── chunking.py      # configurable chunking strategies
 │   │   │   ├── embeddings.py    # get_embedder (ollama HTTP / openai SDK, custom protocol)
-│   │   │   ├── vectorstore.py   # Chroma store adapter (embedded ↔ server)
+│   │   │   ├── vectorstore.py   # VectorStore protocol + Chroma server adapter (pgvector_store.py = pgvector)
 │   │   │   ├── retriever.py     # semantic / keyword / hybrid retrieval + metadata filter
 │   │   │   ├── search.py        # shared retrieve_ranked path (/search and /chat), neighbour context
 │   │   │   ├── cache.py         # Redis query cache (embedding / retrieval / answer), ADR-0004
@@ -160,7 +159,8 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │   │   │   └── qa.py            # RAG prompt + answer synthesis (OpenRouter default)
 │   │   ├── tasks/               # Celery task modules
 │   │   │   ├── ingest.py        # async ingest pipeline
-│   │   │   └── cleanup.py       # retention/tmp cleanup, reindex
+│   │   │   ├── cleanup.py       # retention/tmp cleanup (celery beat)
+│   │   │   └── reindex.py       # vector reindex task
 │   │   ├── db/                  # data layer
 │   │   │   ├── models.py        # SQLAlchemy ORM: Document, Chunk, Job, Trace, User, Role, ApiKey
 │   │   │   └── ops.py           # async DB ops
@@ -177,7 +177,7 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │   │   ├── api/client.ts
 │   │   ├── App.tsx
 │   │   ├── components/
-│   │   ├── pages/               # Overview, Documents, Chat, Traces, Usage (Cost/Performance/RAG/Ingest/Cache), Admin
+│   │   ├── pages/               # Overview, Documents, Chat, Traces, Usage (Cost/Performance/RAG/Ingest/Cache), Admin (Users, Roles, API keys, Settings)
 │   │   ├── store/               # Zustand stores
 │   │   └── types/
 │   ├── vite.config.ts           # Vite + proxy → backend :8000
@@ -189,6 +189,8 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │   │   └── ...                  # api/deployment.yaml, worker/deployment.yaml, etc.
 │   └── overlays/
 │       ├── dev/                 # thin: 1 replica, Compose-like
+│       ├── kind/                # local kind cluster (docs/kubernetes-local.md)
+│       ├── headless/            # API only, no dashboard, behind an Ingress
 │       └── prod/                # scaled: HPA, replicas, resource limits
 │
 ├── config/                      # per-environment non-secret tunables (baked into image)
@@ -198,8 +200,8 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │       └── README.md
 ├── scripts/                     # bench_cache.py (cache benchmark), verify_api_docs.py (runs docs/api.md examples)
 ├── docs/                        # index in docs/README.md
-│   ├── adr/                     # 0001 stack · 0002 parsing · 0003 chunking · 0004 cache · 0005 /v1 contract · 0006 SSE · 0007 API keys
-│   ├── api.md  configuration.md  architecture.md  performance.md
+│   ├── adr/                     # 0001 stack · 0002 parsing · 0003 chunking · 0004 cache · 0005 /v1 contract · 0006 SSE · 0007 API keys · 0008 runtime settings
+│   ├── api.md  configuration.md  architecture.md  performance.md  kubernetes-local.md  design/
 │   └── openapi.json             # committed API contract (generated: make openapi); openapi-breaking-ack.json = approved breaks
 ├── data/                        # gitignored; runtime uploads/store
 └── tmp/                         # gitignored; dev-workflow artifacts (all scratch, never committed)
@@ -223,11 +225,11 @@ Fernet-encrypted with `SETTINGS_ENCRYPTION_KEY` and write-only; secret values mu
 log, trace or audit row.
 
 **Dev (local Compose / laptop)**: set everything in `.env` (see `.env.example`). `RAG_ENV`
-should be unset or `dev` — the config-file step uses `config/config.dev.json`.
+should be unset or `dev` — the config-file step uses `backend/config/config.dev.json` (run from `backend/`; `RAG_CONFIG_DIR` overrides the directory).
 
 **Prod (K8s)**: `RAG_ENV=prod`; secrets come from K8s `Secret`s, non-secret tunables from
-`config/config.prod.json` baked into the image. `Settings._apply_env()` on boot resolves the
-final values.
+`config/config.prod.json` baked into the image (`/app/config/` in the container). `Settings()` resolves the
+final values on construction (env > UI > JSON > defaults).
 
 Secret fields (K8s Secret / `.env`-owned): provider keys (`OPENROUTER_API_KEY` default,
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), `DATABASE_URL`, `REDIS_URL`, `CHROMA_*` creds,

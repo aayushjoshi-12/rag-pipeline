@@ -25,7 +25,8 @@ help:
 	@echo "  down           Stop the compose stack"
 	@echo "  openapi        Re-export docs/openapi.json (refuses unacknowledged breaking changes)"
 	@echo "  logs           Tail compose logs"
-	@echo "  deploy         Build/push/apply K8s manifests (ENV=dev|prod)"
+	@echo "  images         Build backend + frontend images (REGISTRY, TAG, PLATFORM)"
+	@echo "  deploy         Apply a K8s overlay and wait for the migrate Job (ENV=dev|prod|kind|headless)"
 	@echo "  deploy-dry     Dry-run the deploy step"
 
 # ── Install ────────────────────────────────────────────────────────────────────
@@ -46,8 +47,7 @@ backend-test:
 backend-lint:
 	cd backend && uv run ruff check .
 
-backend-fmt:
-	cd backend && uv run ruff format .
+backend-fmt: backend-fmt
 
 backend-typecheck:
 	cd backend && uv run mypy app
