@@ -4,6 +4,29 @@ import type { Job } from '../types'
 import { StatusBadge } from './StatusBadge'
 import { Alert } from './ui'
 
+export interface Tracked {
+  jobId: string
+  filename: string
+}
+
+/** The list of live trackers under an ingest form; nothing when empty. */
+export function TrackedJobs({
+  tracked,
+  onSettled,
+}: {
+  tracked: Tracked[]
+  onSettled: (job: Job) => void
+}) {
+  if (tracked.length === 0) return null
+  return (
+    <div className="jobs">
+      {tracked.map((t) => (
+        <JobTracker key={t.jobId} jobId={t.jobId} filename={t.filename} onSettled={onSettled} />
+      ))}
+    </div>
+  )
+}
+
 const formatBytes = (n: number): string =>
   n >= 1_048_576 ? `${(n / 1_048_576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`
 

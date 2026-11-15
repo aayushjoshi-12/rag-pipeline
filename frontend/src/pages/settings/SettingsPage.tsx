@@ -15,8 +15,7 @@ import type {
 import { AuditTab } from './AuditTab'
 import { ALL_FLOW_KEYS, FLOWS, type Flow } from './flows'
 import { SettingField, shown, type Pending } from './SettingField'
-
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+import { msg } from '../../lib'
 
 /** Per-key validation messages out of a 422 `detail` list (`loc: ["settings", key]`). */
 function fieldErrors(e: unknown): Record<string, string> {

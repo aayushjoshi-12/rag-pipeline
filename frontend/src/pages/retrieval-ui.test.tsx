@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { STORAGE_KEY } from '../retrieval'
-import { renderAt, resetStore, signInAs } from '../test/helpers'
+import { chatSource, renderAt, resetApp, signInAs } from '../test/helpers'
 
 vi.mock('../config', () => ({ POLL_MS: 10 }))
 vi.mock('../api/client', () => ({
@@ -13,21 +13,9 @@ vi.mock('../api/client', () => ({
 }))
 const m = vi.mocked(api)
 
-const src = (over: Record<string, unknown> = {}) => ({
-  text: 'passage',
-  document_id: 'd1000000-0000-0000-0000-000000000001',
-  chunk_index: 1,
-  filename: 'a.md',
-  score: 0.5,
-  ...over,
-})
-
 beforeEach(() => {
-  vi.clearAllMocks()
+  resetApp(m)
   window.localStorage.clear()
-  resetStore()
-  m.listDocuments.mockResolvedValue([])
-  m.health.mockResolvedValue({ status: 'ok', checks: {} })
   m.chat.mockResolvedValue({ answer: 'ok', sources: [] })
 })
 
@@ -175,7 +163,7 @@ describe('retrieval options in the composer', () => {
 
 describe('source rows', () => {
   const answerWith = async (sources: Record<string, unknown>[]) => {
-    m.chat.mockResolvedValue({ answer: 'ok', sources: sources.map((s) => src(s)) as never })
+    m.chat.mockResolvedValue({ answer: 'ok', sources: sources.map((s) => chatSource(s)) as never })
     renderAt('/chat')
     await ask()
     const section = await screen.findByLabelText('answer')

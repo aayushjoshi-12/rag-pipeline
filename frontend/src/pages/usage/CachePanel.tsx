@@ -5,8 +5,8 @@ import { fmtInt, fmtMs, fmtPct, fmtUsd } from '../../components/charts/format'
 import { Alert, Kpi } from '../../components/ui'
 import type { CacheKindStats, CacheStats } from '../../types'
 import { DataTable, TableView } from './DataTable'
+import { msg } from '../../lib'
 
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 const LAYERS: [string, string][] = [
   ['embedding', 'Query embedding'],
   ['retrieval', 'Retrieval result'],

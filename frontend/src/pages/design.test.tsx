@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { StatusBadge } from '../components/StatusBadge'
 import { render } from '@testing-library/react'
-import { signInAs, doc, renderAt, resetStore } from '../test/helpers'
+import { chatSource, doc, renderAt, resetApp, signInAs } from '../test/helpers'
 
 vi.mock('../config', () => ({ POLL_MS: 10 }))
 vi.mock('../api/client', () => ({
@@ -24,27 +24,19 @@ vi.mock('../api/client', () => ({
 }))
 
 const m = vi.mocked(api)
-const src = (over: Record<string, unknown> = {}) => ({
-  text: 'passage',
-  document_id: 'd1000000-0000-0000-0000-000000000001',
-  chunk_index: 1,
-  filename: 'a.md',
-  score: 0.5,
-  ...over,
-})
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  resetStore()
-  m.listDocuments.mockResolvedValue([])
-  m.health.mockResolvedValue({ status: 'ok', checks: {} })
+  resetApp(m)
 })
 
 describe('chat conversation layout', () => {
   it('marks neighbour chunks as context and numbers every source', async () => {
     m.chat.mockResolvedValue({
       answer: 'ok',
-      sources: [src({ filename: 'hit.md' }), src({ filename: 'near.md', is_hit: false })],
+      sources: [
+        chatSource({ filename: 'hit.md' }),
+        chatSource({ filename: 'near.md', is_hit: false }),
+      ],
     })
     renderAt('/chat')
     await userEvent.type(screen.getByLabelText('Question'), 'q')
@@ -69,7 +61,7 @@ describe('chat conversation layout', () => {
 
   it('passages start collapsed to one line and expand to the full chunk', async () => {
     const long = 'x'.repeat(400)
-    m.chat.mockResolvedValue({ answer: 'ok', sources: [src({ text: long })] })
+    m.chat.mockResolvedValue({ answer: 'ok', sources: [chatSource({ text: long })] })
     renderAt('/chat')
     await userEvent.type(screen.getByLabelText('Question'), 'q')
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }))

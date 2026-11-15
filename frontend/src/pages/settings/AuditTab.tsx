@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import { Alert, Card, EmptyState } from '../../components/ui'
 import type { SettingValue, SettingsAuditRow } from '../../types'
+import { when } from '../../lib'
 
 const ACTIONS: Record<string, string> = {
   set: 'changed',
@@ -9,14 +10,6 @@ const ACTIONS: Record<string, string> = {
   set_secret: 'secret replaced',
   clear_secret: 'secret cleared',
   reindex_queued: 'reindex queued',
-}
-
-function when(value: string): string {
-  const iso = /[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? value
-    : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 const fmt = (v: SettingValue): string => (v === null ? 'unset' : String(v))

@@ -1,13 +1,8 @@
 import { useState } from 'react'
 import { api } from '../api/client'
 import { useStore } from '../store'
-import { JobTracker } from './JobTracker'
+import { TrackedJobs, type Tracked } from './JobTracker'
 import { Alert, Card } from './ui'
-
-interface Tracked {
-  jobId: string
-  filename: string
-}
 
 /** Ingest a document from an http(s) link or s3:// object. The server downloads it in the worker. */
 export function LinkForm() {
@@ -77,18 +72,7 @@ export function LinkForm() {
         </div>
       </form>
       {error && <Alert>{error}</Alert>}
-      {tracked.length > 0 && (
-        <div className="jobs">
-          {tracked.map((t) => (
-            <JobTracker
-              key={t.jobId}
-              jobId={t.jobId}
-              filename={t.filename}
-              onSettled={() => void refresh()}
-            />
-          ))}
-        </div>
-      )}
+      <TrackedJobs tracked={tracked} onSettled={() => void refresh()} />
     </Card>
   )
 }

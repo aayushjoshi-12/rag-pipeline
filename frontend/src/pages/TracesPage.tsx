@@ -4,6 +4,7 @@ import { Icon } from '../components/Icon'
 import { Alert, Card, EmptyState, PageHeader } from '../components/ui'
 import type { Trace } from '../types'
 import { costCell, tokensCell, type UsageCell } from './traceUsage'
+import { msg } from '../lib'
 
 const PAGE = 25
 const META_CHIPS: [key: string, label: string][] = [
@@ -61,8 +62,6 @@ function UsageValue({ cell }: { cell: UsageCell }) {
     </span>
   )
 }
-
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 export default function TracesPage() {
   const [kind, setKind] = useState('')

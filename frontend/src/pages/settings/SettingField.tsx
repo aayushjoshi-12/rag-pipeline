@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Icon } from '../../components/Icon'
 import type { SettingItem, SettingValue } from '../../types'
+import { when } from '../../lib'
 
 export type Pending = { kind: 'set'; value: SettingValue } | { kind: 'reset' }
 
@@ -40,15 +41,6 @@ function parse(item: SettingItem, raw: string): SettingValue {
     return raw.trim() !== '' && Number.isFinite(n) ? n : raw
   }
   return raw
-}
-
-function when(value: string | null): string {
-  if (!value) return ''
-  const iso = /[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? value
-    : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 }
 
 export function SettingField({

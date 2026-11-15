@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
-import { doc, job, renderAt, resetStore } from '../test/helpers'
+import { doc, job, renderAt, resetApp } from '../test/helpers'
 
 vi.mock('../config', () => ({ POLL_MS: 10 }))
 vi.mock('../api/client', () => ({
@@ -18,10 +18,7 @@ vi.mock('../api/client', () => ({
 const m = vi.mocked(api)
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  resetStore()
-  m.listDocuments.mockResolvedValue([])
-  m.health.mockResolvedValue({ status: 'ok', checks: {} })
+  resetApp(m)
 })
 
 describe('Add from link', () => {

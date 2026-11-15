@@ -7,8 +7,7 @@ import type { Credits, DayUsage, Insights } from '../types'
 import { chats, totalCost, totalUnpriced } from './usage/model'
 import { CachePanel } from './usage/CachePanel'
 import { CostPanel, IngestPanel, PerformancePanel, RagPanel } from './usage/panels'
-
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
+import { msg } from '../lib'
 
 const TABS = [
   { id: 'cost', label: 'Cost' },

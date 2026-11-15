@@ -1,50 +1,31 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api/client'
 import { Icon } from '../components/Icon'
 import { Alert, Card, PageHeader } from '../components/ui'
+import { useLoadAct } from '../hooks'
+import { toggle } from '../lib'
 import { useAuth } from '../store/auth'
 import type { ManagedUser, Role } from '../types'
-
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 export default function UsersPage() {
   const myId = useAuth((s) => s.me?.id)
   const canSeeRoles = useAuth((s) => s.me?.permissions.includes('roles:manage') ?? false)
   const [users, setUsers] = useState<ManagedUser[]>([])
   const [roles, setRoles] = useState<Role[]>([])
-  const [error, setError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [roleIds, setRoleIds] = useState<string[]>([])
 
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    let live = true
+  const { error, act } = useLoadAct(
     // The role picker needs roles:manage; without it users can still be listed/deactivated.
-    Promise.all([api.listUsers(), canSeeRoles ? api.listRoles() : Promise.resolve([] as Role[])])
-      .then(([u, r]) => {
-        if (live) {
-          setUsers(u)
-          setRoles(r)
-        }
-      })
-      .catch((e: unknown) => {
-        if (live) setError(msg(e))
-      })
-    return () => {
-      live = false
-    }
-  }, [canSeeRoles, tick])
-
-  const act = async (fn: () => Promise<unknown>) => {
-    setError(null)
-    try {
-      await fn()
-      setTick((n) => n + 1)
-    } catch (e) {
-      setError(msg(e))
-    }
-  }
+    () =>
+      Promise.all([api.listUsers(), canSeeRoles ? api.listRoles() : Promise.resolve([] as Role[])]),
+    ([u, r]) => {
+      setUsers(u)
+      setRoles(r)
+    },
+    canSeeRoles,
+  )
 
   const roleId = (name: string): string | undefined => roles.find((r) => r.name === name)?.id
 
@@ -100,11 +81,7 @@ export default function UsersPage() {
                   <input
                     type="checkbox"
                     checked={roleIds.includes(r.id)}
-                    onChange={() =>
-                      setRoleIds((cur) =>
-                        cur.includes(r.id) ? cur.filter((x) => x !== r.id) : [...cur, r.id],
-                      )
-                    }
+                    onChange={() => setRoleIds((cur) => toggle(cur, r.id))}
                   />
                   <span>{r.name}</span>
                 </label>
@@ -150,9 +127,7 @@ export default function UsersPage() {
                                 aria-label={`${u.email} ${r.name}`}
                                 checked={u.roles.includes(r.name)}
                                 onChange={() => {
-                                  const names = u.roles.includes(r.name)
-                                    ? u.roles.filter((n) => n !== r.name)
-                                    : [...u.roles, r.name]
+                                  const names = toggle(u.roles, r.name)
                                   void act(() =>
                                     api.updateUser(u.id, {
                                       role_ids: names.map(roleId).filter((x): x is string => !!x),

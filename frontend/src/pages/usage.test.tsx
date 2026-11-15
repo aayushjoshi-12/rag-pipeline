@@ -3,8 +3,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
-import { renderAt, resetStore } from '../test/helpers'
-import type { Credits, DayUsage, Insights } from '../types'
+import { baseInsights, dayUsage, renderAt, resetApp } from '../test/helpers'
+import type { Credits } from '../types'
 
 vi.mock('../config', () => ({ POLL_MS: 10 }))
 vi.mock('../api/client', () => ({
@@ -20,41 +20,8 @@ vi.mock('../api/client', () => ({
 }))
 const m = vi.mocked(api)
 
-const day = (over: Partial<DayUsage> = {}): DayUsage => ({
-  day: '2026-11-14',
-  requests: 10,
-  errors: 2,
-  avg_ms: 500,
-  p95_ms: 900,
-  prompt_tokens: 1000,
-  completion_tokens: 200,
-  cost_usd: null,
-  unpriced_requests: 0,
-  ...over,
-})
-const insights = (over: Partial<Insights> = {}): Insights => ({
-  days: 14,
-  kind: null,
-  cost_usd: null,
-  priced_chats: 0,
-  unpriced_chats: 0,
-  avg_cost_per_chat: null,
-  by_model: [],
-  latency_bucket_ms: 100,
-  latency_histogram: [],
-  errors_by_reason: [],
-  heatmap: [],
-  rag_days: [],
-  hits_histogram: [],
-  top_documents: [],
-  cited_documents: 0,
-  total_documents: 0,
-  never_cited: 0,
-  reuse_days: [],
-  ingest_modes: [],
-  ingest_failures: [],
-  ...over,
-})
+const day = dayUsage
+const insights = baseInsights
 const credits = (over: Partial<Credits> = {}): Credits => ({
   available: true,
   reason: null,
@@ -67,10 +34,7 @@ const credits = (over: Partial<Credits> = {}): Credits => ({
 })
 
 beforeEach(() => {
-  vi.clearAllMocks()
-  resetStore()
-  m.health.mockResolvedValue({ status: 'ok', checks: {} })
-  m.listDocuments.mockResolvedValue([])
+  resetApp(m)
   m.usage.mockResolvedValue([day()])
   m.usageInsights.mockResolvedValue(insights())
   m.usageCredits.mockResolvedValue(credits())

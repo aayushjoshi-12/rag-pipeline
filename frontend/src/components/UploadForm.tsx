@@ -2,13 +2,8 @@ import { useRef, useState } from 'react'
 import { api } from '../api/client'
 import { useStore } from '../store'
 import { Dropzone } from './Dropzone'
-import { JobTracker } from './JobTracker'
+import { TrackedJobs, type Tracked } from './JobTracker'
 import { Alert, Card } from './ui'
-
-interface Tracked {
-  jobId: string
-  filename: string
-}
 
 export function UploadForm() {
   const input = useRef<HTMLInputElement>(null)
@@ -63,13 +58,7 @@ export function UploadForm() {
         </div>
       </form>
       {error && <Alert>{error}</Alert>}
-      {tracked.length > 0 && (
-        <div className="jobs">
-          {tracked.map((t) => (
-            <JobTracker key={t.jobId} jobId={t.jobId} filename={t.filename} onSettled={onSettled} />
-          ))}
-        </div>
-      )}
+      <TrackedJobs tracked={tracked} onSettled={onSettled} />
     </Card>
   )
 }

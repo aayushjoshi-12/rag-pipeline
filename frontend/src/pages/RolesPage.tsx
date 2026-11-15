@@ -1,49 +1,25 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api/client'
 import { Icon } from '../components/Icon'
 import { Alert, Card, PageHeader } from '../components/ui'
+import { useLoadAct } from '../hooks'
+import { toggle } from '../lib'
 import type { PermissionInfo, Role } from '../types'
-
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 export default function RolesPage() {
   const [roles, setRoles] = useState<Role[]>([])
   const [catalogue, setCatalogue] = useState<PermissionInfo[]>([])
-  const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [picked, setPicked] = useState<string[]>([])
 
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    let live = true
-    Promise.all([api.listRoles(), api.listPermissions()])
-      .then(([r, p]) => {
-        if (live) {
-          setRoles(r)
-          setCatalogue(p)
-        }
-      })
-      .catch((e: unknown) => {
-        if (live) setError(msg(e))
-      })
-    return () => {
-      live = false
-    }
-  }, [tick])
-
-  const act = async (fn: () => Promise<unknown>) => {
-    setError(null)
-    try {
-      await fn()
-      setTick((n) => n + 1)
-    } catch (e) {
-      setError(msg(e))
-    }
-  }
-
-  const toggle = (list: string[], perm: string): string[] =>
-    list.includes(perm) ? list.filter((p) => p !== perm) : [...list, perm]
+  const { error, act } = useLoadAct(
+    () => Promise.all([api.listRoles(), api.listPermissions()]),
+    ([r, p]) => {
+      setRoles(r)
+      setCatalogue(p)
+    },
+  )
 
   return (
     <div className="stack">

@@ -1,21 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { api } from '../api/client'
 import { Icon } from '../components/Icon'
 import { Alert, Card, Dialog, EmptyState, PageHeader } from '../components/ui'
+import { useLoadAct } from '../hooks'
+import { msg, when } from '../lib'
 import { useAuth } from '../store/auth'
 import type { ApiKey, ApiKeyCreated, Role } from '../types'
-
-const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
-
-/** The API returns naive UTC timestamps; show them in the viewer's locale. */
-function when(value: string | null, empty = 'never'): string {
-  if (!value) return empty
-  const iso = /[zZ]|[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime())
-    ? value
-    : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
-}
 
 const EXPIRY: { label: string; days: number | undefined }[] = [
   { label: 'Never', days: undefined },
@@ -95,30 +85,25 @@ export default function ApiKeysPage() {
   const canSeeRoles = useAuth((s) => s.me?.permissions.includes('roles:manage') ?? false)
   const [keys, setKeys] = useState<ApiKey[] | null>(null)
   const [roles, setRoles] = useState<Role[]>([])
-  const [error, setError] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [roleId, setRoleId] = useState('')
   const [expiryIdx, setExpiryIdx] = useState(2) // 90 days: a safe default, "Never" is a deliberate choice
   const [created, setCreated] = useState<ApiKeyCreated | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    let live = true
-    Promise.all([api.listApiKeys(), canSeeRoles ? api.listRoles() : Promise.resolve([] as Role[])])
-      .then(([k, r]) => {
-        if (!live) return
-        setKeys(k)
-        setRoles(r)
-        setRoleId((cur) => cur || r.find((x) => x.name !== 'admin')?.id || '')
-      })
-      .catch((e: unknown) => {
-        if (live) setError(msg(e))
-      })
-    return () => {
-      live = false
-    }
-  }, [canSeeRoles, tick])
+  const { error, setError, act, reload } = useLoadAct(
+    () =>
+      Promise.all([
+        api.listApiKeys(),
+        canSeeRoles ? api.listRoles() : Promise.resolve([] as Role[]),
+      ]),
+    ([k, r]) => {
+      setKeys(k)
+      setRoles(r)
+      setRoleId((cur) => cur || r.find((x) => x.name !== 'admin')?.id || '')
+    },
+    canSeeRoles,
+  )
 
   const picked = roles.find((r) => r.id === roleId)
 
@@ -133,7 +118,7 @@ export default function ApiKeysPage() {
       })
       setCreated(out) // the only copy of the secret lives in this state until the dialog closes
       setName('')
-      setTick((n) => n + 1)
+      reload()
     } catch (e) {
       setError(msg(e))
     } finally {
@@ -141,15 +126,7 @@ export default function ApiKeysPage() {
     }
   }
 
-  const revoke = async (k: ApiKey) => {
-    setError(null)
-    try {
-      await api.revokeApiKey(k.id)
-      setTick((n) => n + 1)
-    } catch (e) {
-      setError(msg(e))
-    }
-  }
+  const revoke = (k: ApiKey) => act(() => api.revokeApiKey(k.id))
 
   return (
     <div className="stack">
@@ -284,7 +261,7 @@ export default function ApiKeysPage() {
                     <td>
                       <KeyStatus status={k.status} />
                     </td>
-                    <td>{when(k.last_used_at)}</td>
+                    <td>{when(k.last_used_at, 'never')}</td>
                     <td>{when(k.expires_at, 'no expiry')}</td>
                     <td className="col-actions">
                       {k.status === 'active' && (
