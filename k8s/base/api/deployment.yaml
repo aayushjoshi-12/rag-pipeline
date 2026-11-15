@@ -24,6 +24,35 @@ spec:
           type: RuntimeDefault
       # Service-link env vars (CHROMA_PORT=tcp://...) collide with CHROMA_*/REDIS_* settings; we use DNS.
       enableServiceLinks: false
+      # `kubectl apply -k` starts the api together with Postgres and the migrate Job. The api seeds the built-in
+      # roles and the bootstrap admin once, at startup, and does not retry: if the tables are not there yet the
+      # pod comes up healthy but nobody can log in (found on a real cluster). Hold the api until Alembic is at head.
+      initContainers:
+        - name: wait-for-migrate
+          image: rag-pipeline/backend:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+            - |
+              for i in $(seq 1 300); do
+                alembic current 2>/dev/null | grep -q '(head)' && exit 0
+                sleep 2
+              done
+              echo "database is not migrated to head (is the rag-pipeline-migrate Job running?)" >&2
+              exit 1
+          envFrom:
+            - configMapRef:
+                name: rag-pipeline-config
+            - secretRef:
+                name: rag-pipeline-secrets
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests: {cpu: 10m, memory: 128Mi}
+            limits: {cpu: 250m, memory: 384Mi}
       containers:
         - name: api
           image: rag-pipeline/backend:latest

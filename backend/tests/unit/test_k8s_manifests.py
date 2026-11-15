@@ -7,6 +7,7 @@ Skipped when kubectl isn't installed. This does NOT prove the manifests apply to
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -188,3 +189,39 @@ def test_headless_overlay_has_no_dashboard_and_routes_the_ingress_to_the_api() -
         for p in rule["http"]["paths"]
     ]
     assert backends == ["rag-pipeline-api"] and "rag-pipeline-api" in by_kind(docs, "Service")
+
+
+@pytest.mark.parametrize("overlay", ["dev", "prod", "kind", "headless"])
+def test_api_waits_for_the_migration_before_it_seeds_auth(overlay: str) -> None:
+    # Found on a real cluster: `kubectl apply -k` starts the api next to Postgres and the migrate Job. The api seeds
+    # roles + the bootstrap admin once at startup and never retries, so an api that wins the race is Ready but nobody
+    # can log in ("invalid credentials"). The pod must not start its main container before Alembic is at head.
+    tpl = pod_specs(render(overlay))["rag-pipeline-api"]["spec"]
+    waiters = [c for c in tpl.get("initContainers", []) if c["name"] == "wait-for-migrate"]
+    assert len(waiters) == 1, overlay
+    script = " ".join(waiters[0]["command"])
+    assert "alembic current" in script and "(head)" in script
+    assert {"configMapRef", "secretRef"} <= {k for ef in waiters[0]["envFrom"] for k in ef}  # DATABASE_URL reaches it
+    assert waiters[0]["image"].startswith("rag-pipeline/backend:")  # same image (and tag) as the api
+
+
+
+def test_s3_component_drops_the_shared_uploads_volume(tmp_path: Path) -> None:
+    # Measured on a 2-worker-node kind cluster: with a ReadWriteOnce uploads PVC every api/worker pod is pinned to the
+    # volume's node (a worker forced elsewhere stays Pending). STORAGE_BACKEND=s3 is the multi-node answer, so the
+    # component must set the backend AND remove the PVC + its mounts' claims, or the pods would still be pinned.
+    k8s = ROOT / "k8s"
+    (tmp_path / "kustomization.yaml").write_text(
+        "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n"
+        f"resources: [{os.path.relpath(k8s / 'overlays' / 'prod', tmp_path)}]\n"
+        f"components: [{os.path.relpath(k8s / 'components' / 's3', tmp_path)}]\n"
+    )
+    out = subprocess.run(["kubectl", "kustomize", str(tmp_path)], capture_output=True, text=True, check=True).stdout
+    docs = [d for d in yaml.safe_load_all(out) if d]
+    cfg = by_kind(docs, "ConfigMap")["rag-pipeline-config"]["data"]
+    assert cfg["STORAGE_BACKEND"] == "s3" and cfg["S3_BUCKET"]
+    assert "rag-pipeline-uploads" not in by_kind(docs, "PersistentVolumeClaim")
+    for name in ("rag-pipeline-api", "rag-pipeline-worker"):
+        vols = by_kind(docs, "Deployment")[name]["spec"]["template"]["spec"]["volumes"]
+        assert vols == [{"name": "uploads", "emptyDir": {}}], name
+    test_references_resolve(docs)  # no dangling claim / mount after the patches

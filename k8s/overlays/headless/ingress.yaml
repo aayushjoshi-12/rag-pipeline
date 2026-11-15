@@ -6,7 +6,7 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 30m
 spec:
-  # ingressClassName: nginx   # set to your cluster's class
+  # ingressClassName: nginx   # REQUIRED on most clusters (kind's ingress-nginx class is not the default)
   rules:
     - host: api.example.com   # replace
       http:

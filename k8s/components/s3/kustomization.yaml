@@ -1,0 +1,29 @@
+# Optional: keep uploaded files in S3 (or any S3-compatible store) instead of a shared volume.
+# The api and worker then need NO ReadWriteMany (or even ReadWriteOnce) uploads volume, so replicas can
+# spread over nodes freely. Add under `components:` in an overlay and set the bucket/endpoint with a
+# ConfigMap patch. Put S3_ACCESS_KEY_ID / S3_SECRET_ACCESS_KEY in the Secret (or leave them empty to use the
+# pod's IAM role). Create the bucket once: kubectl exec deploy/rag-pipeline-api -- python -m app.manage ensure-bucket
+# The uploads PVC is dropped and /app/data becomes a per-pod emptyDir (scratch space for parsing only).
+apiVersion: kustomize.config.k8s.io/v1alpha1
+kind: Component
+patches:
+  - target: {kind: ConfigMap, name: rag-pipeline-config}
+    patch: |-
+      - op: replace
+        path: /data/STORAGE_BACKEND
+        value: s3
+      - op: replace
+        path: /data/S3_BUCKET
+        value: rag-documents
+  - target: {kind: PersistentVolumeClaim, name: rag-pipeline-uploads}
+    patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: rag-pipeline-uploads
+  - target: {kind: Deployment, name: "rag-pipeline-(api|worker)"}
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value: {name: uploads, emptyDir: {}}

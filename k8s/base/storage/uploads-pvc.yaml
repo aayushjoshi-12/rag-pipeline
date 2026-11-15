@@ -1,7 +1,8 @@
 # Raw uploads are written by the API and read by the workers, so this volume must be shared.
 # With more than one replica it needs a ReadWriteMany storage class (NFS, EFS, Filestore, CephFS...).
-# On a single-node cluster (kind/minikube/k3s) the default ReadWriteOnce class is enough only if all
-# pods land on the same node; set storageClassName in an overlay for your cluster.
+# On a single-node cluster (kind/minikube/k3s) the default ReadWriteOnce class is enough. On several nodes an RWO
+# volume does not fail, it pins EVERY api/worker pod to the volume's node (measured on kind); use an RWX class or
+# components/s3 (STORAGE_BACKEND=s3, no volume). Set storageClassName in an overlay for your cluster.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
