@@ -4,8 +4,8 @@
         check chroma-test-up chroma-test-down fmt \
         run run-backend run-frontend \
         db-up db-down migrate \
-        up up-api down logs openapi \
-        deploy deploy-dry images
+        up up-api down up-image down-image logs openapi \
+        deploy deploy-dry images release-dry-run
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,8 @@ help:
 	@echo "  openapi        Re-export docs/openapi.json (refuses unacknowledged breaking changes)"
 	@echo "  logs           Tail compose logs"
 	@echo "  images         Build backend + frontend images (REGISTRY, TAG, PLATFORM)"
+	@echo "  release-dry-run  Build both images for the native platform, as the release workflow does (no push)"
+	@echo "  up-image/down-image  Run the PUBLISHED images (docker-compose.image.yml; RAG_VERSION, RAG_IMAGE_REGISTRY)"
 	@echo "  deploy         Apply a K8s overlay and wait for the migrate Job (ENV=dev|prod|kind|headless)"
 	@echo "  deploy-dry     Dry-run the deploy step"
 
@@ -126,6 +128,13 @@ up-api:
 down:
 	docker compose --profile ui down
 
+# The published images (no build): see docs/deployment.md. Pin RAG_VERSION=x.y.z for anything beyond a trial.
+up-image:
+	docker compose -f docker-compose.image.yml up -d
+
+down-image:
+	docker compose -f docker-compose.image.yml down
+
 logs:
 	docker compose logs -f api worker
 
@@ -144,6 +153,13 @@ PLATFORM ?= linux/amd64
 images:
 	docker build --platform $(PLATFORM) -t $(REGISTRY)/backend:$(TAG) backend
 	docker build --platform $(PLATFORM) -f frontend/Dockerfile.prod -t $(REGISTRY)/frontend:$(TAG) frontend
+
+# What .github/workflows/release.yml builds (same contexts and Dockerfiles), for the host's native platform, nothing pushed.
+# Tagged rag-pipeline-{backend,frontend}:release-dry-run; amd64+arm64 is only built in CI (QEMU).
+release-dry-run:
+	docker build -t rag-pipeline-backend:release-dry-run backend
+	docker build -f frontend/Dockerfile.prod -t rag-pipeline-frontend:release-dry-run frontend
+	@docker images --format '{{.Repository}}:{{.Tag}}  {{.Size}}' | grep release-dry-run
 
 # Jobs are immutable, so the previous migrate Job is removed before re-applying; then wait for it.
 deploy:

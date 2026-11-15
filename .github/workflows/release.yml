@@ -1,0 +1,168 @@
+name: Release
+
+# Publishes the backend and frontend images to GHCR and creates a GitHub Release.
+#   - push of a tag vX.Y.Z (or vX.Y.Z-rc.1): checks -> scan -> multi-arch build + push -> release
+#   - manual run (workflow_dispatch): same build and scan, nothing is pushed and no release is created (dry run)
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false  # never cancel a half-published release
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  checks:
+    name: Repo checks (ci.yml)
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
+  images:
+    name: Image (${{ matrix.image }})
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # arm64 under QEMU is slow on a cold cache
+    permissions:
+      contents: read
+      packages: write          # push to GHCR
+      id-token: write          # sigstore signing of the provenance attestation
+      attestations: write      # store the attestation
+      security-events: write   # upload Trivy SARIF
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: backend
+            context: backend
+            dockerfile: backend/Dockerfile
+          - image: frontend
+            context: frontend
+            dockerfile: frontend/Dockerfile.prod
+    env:
+      PUSH: ${{ github.event_name == 'push' }}
+      PRERELEASE: ${{ contains(github.ref_name, '-') }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Image name (lowercase owner)
+        id: name
+        run: echo "image=${REGISTRY}/${OWNER,,}/rag-pipeline-${{ matrix.image }}" >> "$GITHUB_OUTPUT"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
+        with:
+          images: ${{ steps.name.outputs.image }}
+          flavor: latest=false
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}},enable=${{ env.PRERELEASE != 'true' }}
+            type=raw,value=latest,enable=${{ github.event_name == 'push' && env.PRERELEASE != 'true' }}
+            type=raw,value=dryrun,enable=${{ github.event_name != 'push' }}
+
+      # Build the native (amd64) image into the local daemon first, so it can be scanned BEFORE anything is pushed.
+      - name: Build (amd64, local, for the scan)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: scan/${{ matrix.image }}:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          cache-from: type=gha,scope=release-${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.image }}
+
+      - name: Trivy scan (SARIF, all severities)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: scan/${{ matrix.image }}:ci
+          format: sarif
+          output: trivy-${{ matrix.image }}.sarif
+          ignore-unfixed: true
+          exit-code: "0"
+
+      - name: Upload Trivy SARIF
+        # Code scanning is free on public repositories only; skip (do not fail) while the repo is private.
+        if: ${{ !github.event.repository.private }}
+        uses: github/codeql-action/upload-sarif@9418214df1f2c4b8128c770156c409013b07d6b9 # v3.39.3
+        with:
+          sarif_file: trivy-${{ matrix.image }}.sarif
+          category: trivy-${{ matrix.image }}
+
+      - name: Trivy gate (fail on CRITICAL with a fix available)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: scan/${{ matrix.image }}:ci
+          format: table
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      # Multi-arch build. The amd64 layers come from the cache written above; arm64 is built under QEMU.
+      # Pushes only for a tag; a manual run builds both architectures and discards the result.
+      - name: Build and push (amd64 + arm64)
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ env.PUSH == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+          cache-from: type=gha,scope=release-${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=release-${{ matrix.image }}
+
+      - name: Attest build provenance
+        if: env.PUSH == 'true'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ steps.name.outputs.image }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+  release:
+    name: GitHub Release
+    if: github.event_name == 'push'
+    needs: images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write  # create the release
+    steps:
+      - name: Create release with generated notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          flags=(--generate-notes --verify-tag)
+          if [[ "$TAG" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$TAG" --repo "$REPO" --title "$TAG" "${flags[@]}"

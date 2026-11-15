@@ -1,0 +1,159 @@
+# Runs the PUBLISHED images (no build step):
+#
+#   cp .env.example .env        # set SECRET_KEY, SETTINGS_ENCRYPTION_KEY and the admin bootstrap (see docs/deployment.md)
+#   docker compose -f docker-compose.image.yml up -d
+#
+# Same services, healthchecks, limits and volumes as docker-compose.yml (the build-from-source stack), minus the
+# build sections and the test/s3 profiles. Use one stack or the other, not both: they share default host ports.
+#
+# Knobs (shell or the project's .env):
+#   RAG_IMAGE_REGISTRY  image registry/namespace   (default ghcr.io/aayushjoshi-12)
+#   RAG_VERSION         image tag, e.g. 0.1.0      (default latest; pin a version in production)
+#   RAG_ENV_FILE        file holding the app settings (default .env)
+#   RAG_API_PORT / RAG_UI_PORT / RAG_DB_PORT / RAG_REDIS_PORT / RAG_CHROMA_PORT   host ports
+
+x-backend-env: &backend-env
+  # Inside containers the services are reached by their Compose hostnames (these override the env file).
+  DATABASE_URL: postgresql+asyncpg://rag:rag@db:5432/rag
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  CACHE_REDIS_URL: redis://redis:6379/12
+  CHROMA_HOST: chroma
+  CHROMA_PORT: "8000"
+  # Ollama runs on the host; host.docker.internal reaches it from the containers.
+  OLLAMA_BASE_URL: ${OLLAMA_DOCKER_URL:-http://host.docker.internal:11434}
+  DATA_DIR: /app/data
+  AUTH_ENABLED: ${AUTH_ENABLED:-true}
+  SECRET_KEY: ${SECRET_KEY:-}
+  ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+  STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+  S3_ENDPOINT_URL: ${S3_ENDPOINT_URL_DOCKER:-${S3_ENDPOINT_URL:-}}
+  S3_BUCKET: ${S3_BUCKET:-}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  S3_PREFIX: ${S3_PREFIX:-rag-pipeline/}
+  S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+  S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+  URL_INGEST_ALLOW_PRIVATE: ${URL_INGEST_ALLOW_PRIVATE:-false}
+  PARSE_NORMALIZE_TEXT: ${PARSE_NORMALIZE_TEXT:-true}
+
+x-backend: &backend
+  # One image shared by api/worker/beat/migrate.
+  image: ${RAG_IMAGE_REGISTRY:-ghcr.io/aayushjoshi-12}/rag-pipeline-backend:${RAG_VERSION:-latest}
+  env_file: ${RAG_ENV_FILE:-.env}
+  environment: *backend-env
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  volumes:
+    - appdata:/app/data
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+    ports:
+      - "${RAG_DB_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "${RAG_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  chroma:
+    image: chromadb/chroma:1.5.9  # pinned: see chroma/config.yaml for why
+    restart: unless-stopped
+    ports:
+      - "${RAG_CHROMA_PORT:-8001}:8000"
+    volumes:
+      - chroma-data:/data
+      - ./chroma/config.yaml:/config.yaml:ro  # bounds the HNSW index cache (needs this repo's chroma/ directory)
+    mem_limit: 1536m
+    mem_reservation: 512m
+
+  migrate:
+    <<: *backend
+    command: alembic upgrade head
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend
+    ports:
+      - "${RAG_API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 256m
+
+  worker:
+    <<: *backend
+    command: celery -A app.celery_app worker --loglevel=INFO
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      chroma:
+        condition: service_started
+    restart: unless-stopped
+    mem_limit: 3g
+    mem_reservation: 512m
+
+  beat:
+    <<: *backend
+    command: celery -A app.celery_app beat --loglevel=INFO -s /tmp/celerybeat-schedule
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 384m
+    mem_reservation: 192m
+
+  frontend:
+    # Production dashboard image: static build on nginx, /api proxied to the api service.
+    image: ${RAG_IMAGE_REGISTRY:-ghcr.io/aayushjoshi-12}/rag-pipeline-frontend:${RAG_VERSION:-latest}
+    environment:
+      API_UPSTREAM: http://api:8000
+    ports:
+      - "${RAG_UI_PORT:-5173}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  appdata:
+  pgdata:
+  chroma-data:
