@@ -1,89 +1,139 @@
 # rag-pipeline
 
-A self-hostable **Retrieval-Augmented Generation pipeline**: upload documents, have them parsed,
-chunked, embedded and indexed by background workers, then ask questions and get answers with
-cited sources. FastAPI + Celery + Postgres/pgvector + ChromaDB + a React dashboard, runnable on a
-laptop with Docker Compose and shaped for Kubernetes (Kustomize).
+**A self-hostable RAG pipeline: upload documents, get cited answers, and see what every answer costs.**
+FastAPI, Celery, Postgres/pgvector, ChromaDB and a React dashboard. Runs on a laptop with Docker Compose and on Kubernetes with Kustomize.
 
-```
-upload ─► API (FastAPI) ─► Redis ─► Celery worker ─► parse ─► chunk ─► embed ─► Chroma + Postgres
-                                                                                     │
-question ─► API ─► embed query ─► Chroma similarity ─► LLM (grounded prompt) ─► answer + sources
-```
+[![CI](https://github.com/aayushjoshi-12/rag-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/aayushjoshi-12/rag-pipeline/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/aayushjoshi-12/rag-pipeline)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/aayushjoshi-12/rag-pipeline?include_prereleases)](https://github.com/aayushjoshi-12/rag-pipeline/releases)
+[![GHCR image](https://img.shields.io/badge/ghcr.io-rag--pipeline--backend-2496ED?logo=docker&logoColor=white)](https://github.com/aayushjoshi-12/rag-pipeline/pkgs/container/rag-pipeline-backend)
 
-## What it does
+![Chat with a streamed, cited answer and grouped sources](docs/images/hero-chat.png)
 
-- **Ingest** — `POST /documents` (pdf, docx, txt, md). The API only stores the file and enqueues a
-  job; a worker does the heavy lifting and reports status you can poll (`GET /jobs/{id}`).
-- **Parse** — PDFs use their own text layer when they have one (free, instant, no API key); only
-  scanned pages are rendered and read by a vision LLM (OpenRouter / OpenAI / Anthropic) or Tesseract OCR; DOCX goes through docling's Word backend
-  to markdown (no ML models). Provider, model, system
-  prompt, DPI, OCR language and timeouts are all config ([ADR-0002](docs/adr/0002-document-parsing.md)).
-- **Chunk** — content-defined chunking (rolling hash), so editing one paragraph leaves the other
-  chunks — and their SHA-256 hashes — unchanged ([ADR-0003](docs/adr/0003-chunking.md)).
-- **Answer** — `POST /chat` retrieves the nearest chunks (optionally limited to chosen documents),
-  builds a numbered-context prompt and returns the answer plus the sources it used. If nothing
-  relevant is found the LLM is not called.
-- **Search without an LLM** — `POST /search` returns the ranked passages only (same retrieval as `/chat`, no LLM key
-  needed), for teams that bring their own UI or LLM. See [docs/api.md](docs/api.md).
-- **Observe** — Langfuse spans for every ingest stage and chat request; prompt/question content is
-  only sent when `LANGFUSE_CAPTURE_CONTENT=true`. Structured JSON logs carry `job_id` / `chat_id`.
-- **Dashboard** — upload with live job status, document list/detail with chunks, chat with citations,
-  plus a Traces page (every chat and ingest run: status, duration, model, tokens, hits, error) and a
-  Usage page (requests, error rate, latency and LLM tokens per day). Question text is only stored in
-  traces when `TRACE_CAPTURE_CONTENT=true`; traces are purged after `TRACE_RETENTION_DAYS` (30).
-- **Access control** — JWT login with role-based access: admins define roles as sets of permissions
-  (`documents:read|write|delete`, `jobs:read`, `chat:use`, `search:use`, `traces:read`, `users:manage`, `roles:manage`, `apikeys:manage`, `cache:manage`, `settings:read|manage`) and assign
-  them to users. Permissions are checked server-side on every request and re-read from the database,
-  so editing a role or deactivating a user takes effect immediately.
-- **Housekeeping** — a Celery beat task removes orphaned upload directories.
+## Why this exists
 
-## Quick start (Docker Compose)
+- **Most RAG demos stop at "it answered".** This one also parses real PDFs and Word files, updates documents incrementally, caches repeated questions, and records tokens and cost for every request.
+- **The same code runs everywhere.** One `make up` on a laptop, the same images behind Kubernetes with autoscaling, and an API-only mode when you bring your own UI.
+- **You pick the parts.** Chat model, embeddings, vision parser, vector store, retrieval mode and chunking are settings (editable at runtime in the dashboard), not code changes.
+- **It tells you what it has and has not been tested on.** See [Status and limits](#status-and-limits).
 
-Requires Docker and [Ollama](https://ollama.com) on the host (embeddings), plus a free
-[OpenRouter](https://openrouter.ai) key for chat.
+## Features
 
-```bash
-ollama pull mxbai-embed-large
-cp .env.example .env            # set OPENROUTER_API_KEY, SECRET_KEY, ADMIN_EMAIL, ADMIN_PASSWORD
-                                # (single-quote values containing special characters)
-docker compose --profile ui up -d --build   # db, redis, chroma, migrate (one-shot), api, worker, beat, frontend (= `make up`; drop `--profile ui` / use `make up-api` for no dashboard)
-```
+**Ingest and parsing**
+- Upload pdf, docx, txt or md, or ingest from an `https://` or `s3://` link; workers parse, chunk, embed and index with pollable job status ([API](docs/api.md)).
+- PDFs use their own text layer when they have one (free and fast); only scanned pages go to a vision model or Tesseract OCR; DOCX goes through docling ([ADR-0002](docs/adr/0002-document-parsing.md)).
+- Content-defined chunking: editing a document re-embeds only the chunks that changed ([ADR-0003](docs/adr/0003-chunking.md)).
+- Local-disk or S3-compatible file storage ([configuration](docs/configuration.md#file-storage-and-url-ingest)).
 
-- Dashboard: http://localhost:5173 &nbsp;·&nbsp; API docs: http://localhost:8000/docs
-- Sign in with `ADMIN_EMAIL` / `ADMIN_PASSWORD` (the first admin is created only while there are no
-  users). Locked out? `docker compose exec api python -m app.manage create-admin --email you@example.com`.
-  `AUTH_ENABLED=false` disables login entirely (every request is an admin) — demos only.
+**Retrieval and chat**
+- Semantic, keyword (BM25) and hybrid search with rank fusion; Chroma or pgvector, with HNSW / IVFFlat options ([configuration](docs/configuration.md#retrieval-modes)).
+- Streaming chat over Server-Sent Events with inline citations, sources grouped by document and neighbour context ([ADR-0006](docs/adr/0006-chat-streaming-sse.md)).
+- `POST /search` returns ranked passages with no LLM call, for teams that bring their own model ([API](docs/api.md#post-search---ranked-passages-no-llm)).
+- A three-layer Redis query cache (embedding, retrieval, answer) that fails open if Redis is down ([ADR-0004](docs/adr/0004-query-cache.md)).
 
-Inside the containers the service hostnames (`db`, `redis`, `chroma`) and the host Ollama
-(`host.docker.internal`) override whatever `.env` says, so the same `.env` works for host-run
-development and for Compose.
+**Observability and cost**
+- Traces for every chat, search and ingest request: duration, tokens, cost, cache hits, errors.
+- Usage pages for spend per day and per model, latency, retrieval health, ingest and cache effectiveness ([configuration](docs/configuration.md#llm-cost-and-the-usage-page)).
+- Optional Langfuse tracing. Question text is stored only when you enable it.
 
-No build toolchain? Run the published images instead (`docker compose -f docker-compose.image.yml up -d`); see [docs/deployment.md](docs/deployment.md).
+**Operations and deployment**
+- Docker Compose for local use, Kustomize overlays (`dev`, `prod`, `kind`, `headless`) with HPAs for Kubernetes ([deployment](docs/deployment.md#kubernetes-overview)).
+- Multi-arch images (amd64, arm64) built by a release workflow with Trivy, SBOM and provenance ([deployment](docs/deployment.md#published-images)); none are published until the first release.
+- Compose memory limits per container, health endpoint, idempotent migrations that run before the app starts.
 
-### Without containers for the app
+**Security and admin**
+- JWT login, admin-defined roles and permissions checked on every request, and revocable API keys for services ([ADR-0007](docs/adr/0007-api-keys.md)).
+- Admin Settings window: change providers, models and tunables at runtime; provider keys are write-only and stored encrypted ([ADR-0008](docs/adr/0008-runtime-settings.md)).
+- Versioned `/v1` API with a committed OpenAPI contract and a test that fails on breaking changes ([ADR-0005](docs/adr/0005-api-versioning-and-contract.md)).
+
+## Quickstart
+
+You need Docker with Compose. Embeddings default to a local [Ollama](https://ollama.com) on the host:
 
 ```bash
-make install        # uv sync + npm install
-make db-up          # postgres, redis, chroma only
-make migrate
-make run-backend    # :8000        (worker: uv run celery -A app.celery_app worker, from backend/)
-make run-frontend   # :5173
+ollama pull mxbai-embed-large     # once; containers reach it at host.docker.internal:11434
 ```
 
-## Configuration
+Chat and (optional) vision parsing need a provider key, for example an [OpenRouter](https://openrouter.ai) key. You add it in the dashboard, so it never has to live in a file. To use hosted embeddings instead of Ollama, change the embedding provider in Admin > Settings.
 
-Three layers, highest wins: environment variables → the admin Settings window (database) → `config/config.<RAG_ENV>.json` (`backend/config/config.dev.json` for dev) → defaults
-(`backend/app/config.py`, [ADR-0008](docs/adr/0008-runtime-settings.md)). Secrets (API keys, `DATABASE_URL`, …) live in `.env` / Kubernetes
-Secrets; tunables (models, chunk size, top-k, parser knobs) are plain config. Everything is
-swappable: `LLM_PROVIDER` (openrouter | openai | anthropic), `EMBEDDING_PROVIDER` (ollama | openai),
-`PARSER_PROVIDER` (openrouter | openai | anthropic | ocr). Free-tier OpenRouter models come and go —
-if chat returns a 502, check `DEFAULT_LLM_MODEL` against OpenRouter's current model list.
-`VECTOR_STORE` (chroma | pgvector), `VECTOR_METRIC`, `VECTOR_INDEX` (hnsw | ivfflat | none) and the HNSW / IVFFlat
-knobs choose where vectors live and how they are indexed; changing them on existing data is a
-`python -m app.manage reindex`. `RETRIEVAL_MODE` (semantic | keyword | hybrid, also per request on `POST /chat`),
-`RETRIEVAL_KEYWORD_METHOD` (bm25 | postgres_fts), `RETRIEVAL_FUSION` (rrf | weighted) and the BM25 / RRF / weight knobs choose how chunks are
-found; `semantic` (embeddings only) is the default. Every key is listed in [`docs/configuration.md`](docs/configuration.md).
+**(a) From source** (builds the images from this checkout):
+
+```bash
+git clone https://github.com/aayushjoshi-12/rag-pipeline.git && cd rag-pipeline
+cp .env.example .env
+# fill the four blanks in .env: SECRET_KEY and SETTINGS_ENCRYPTION_KEY (each: python3 -c 'import secrets; print(secrets.token_urlsafe(48))'),
+# plus ADMIN_EMAIL and ADMIN_PASSWORD for the first admin
+make up
+```
+
+Open the dashboard at http://localhost:5173 (API docs at http://localhost:8000/docs), sign in with your admin, then **Admin > Settings**: add your LLM provider key and click "Test connection". Upload a document on **Documents**, wait for `ready`, and ask a question on **Chat**. `make down` stops the stack and keeps your data.
+
+**(b) Published images** (no build toolchain; available after the first release is published):
+
+```bash
+git clone https://github.com/aayushjoshi-12/rag-pipeline.git && cd rag-pipeline
+cp .env.example .env              # fill the same four values as above
+docker compose -f docker-compose.image.yml up -d    # or: make up-image; pin a version with RAG_VERSION=0.1.0
+```
+
+Same services and ports as (a). Details, tags, upgrades and Kubernetes image overrides: [docs/deployment.md](docs/deployment.md). Single-quote values in `.env` that contain `& ; ! $`. Locked out? `docker compose exec api python -m app.manage create-admin --email you@example.com`.
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Document picker](docs/images/chat-document-picker.png) Narrow a question to chosen documents. | ![Usage, cost](docs/images/usage-cost.png) Spend per day and per model (light theme). |
+| ![Usage, cache](docs/images/usage-cache.png) Cache hit rates, LLM and embedding calls avoided. | ![Traces](docs/images/traces.png) Every request with tokens, cost and cache status. |
+| ![Admin Settings](docs/images/settings.png) Settings with env-locked values and write-only secrets. | <img src="docs/images/chat-phone.png" alt="Chat at phone width" width="260"> The dashboard works at phone width. |
+
+The screenshots use two public Fannie Mae Selling Guide chapters (not bundled in this repository) and a throwaway local account.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    UI["Dashboard (React)"] --> API
+    CLI["curl / SDK"] --> API
+    API["API (FastAPI)"] -->|enqueue| REDIS[("Redis<br/>broker + cache")]
+    REDIS --> WORKER["Celery workers<br/>parse, chunk, embed"]
+    WORKER --> PG[("Postgres + pgvector<br/>metadata, traces")]
+    WORKER --> CHROMA[("ChromaDB<br/>vectors")]
+    WORKER --> EMB["Embeddings<br/>Ollama or OpenAI"]
+    WORKER -.->|scanned pages| VIS["Vision / OCR"]
+    API -->|retrieve| CHROMA
+    API --> PG
+    API -->|grounded prompt| LLM["LLM provider<br/>OpenRouter, OpenAI, Anthropic"]
+```
+
+The API only accepts uploads and enqueues work; workers do the heavy lifting, so API and workers scale independently. The full diagram, deployment matrix and design boundaries are in [docs/architecture.md](docs/architecture.md).
+
+## Call it from code
+
+Log in, search (no LLM involved) and ask a question. More examples (upload, poll a job, API keys, JavaScript) are in [docs/api.md](docs/api.md#end-to-end-examples).
+
+```bash
+API=http://localhost:8000
+TOKEN=$(curl -sf "$API/v1/auth/login" -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"your-password"}' | jq -r .access_token)
+
+curl -sf "$API/v1/search" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"query":"how are reserves calculated","top_k":3}' | jq '.results[] | {rank, filename, text: .text[:80]}'
+
+curl -sf "$API/v1/chat" -H "Authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"question":"How are reserves calculated?","top_k":3}' | jq '{answer, sources: (.sources | length)}'   # calls your LLM provider
+```
+
+```python
+import httpx
+
+client = httpx.Client(base_url="http://localhost:8000", timeout=60)
+token = client.post("/v1/auth/login", json={"email": "you@example.com", "password": "your-password"}).json()["access_token"]
+client.headers["Authorization"] = f"Bearer {token}"  # services: client.headers["X-API-Key"] = "rag_..."
+
+hits = client.post("/v1/search", json={"query": "how are reserves calculated", "top_k": 3}).json()
+for hit in hits["results"]:
+    print(hit["rank"], hit["filename"], hit["text"][:80])
+```
 
 ## By the numbers
 
@@ -94,96 +144,51 @@ Measured on one laptop (Apple M4) with real Fannie Mae Selling Guide chapters; m
 - **A chat answer costs ~$0.00001** on a small model (roughly 70,000 answers per dollar); local embeddings are free.
 - **Sources appear in under 0.25 s** while the answer streams.
 - **Autoscaled 2 -> 8 API pods on a laptop Kubernetes cluster**, 13,254 searches in 4 minutes, **zero errors**; settings changes reach every replica in under 3 s.
-- **If Redis dies, the app keeps answering** (uncached, ~50 ms) and heals itself; **1,400+ backend and 300+ frontend tests**, key ones mutation-checked.
+- **If Redis dies, the app keeps answering** (uncached, ~50 ms) and heals itself; 1,400+ backend and 300+ frontend tests, key ones mutation-checked.
 
-## API
+## Deployment
 
-All routes except `/health` and `/auth/login|refresh` need a bearer token (or an API key) with the listed permission.
-**Every route below is served under `/v1`** (the contract in [`docs/openapi.json`](docs/openapi.json)); the unversioned paths still work as deprecated aliases (`Deprecation` header). Errors are `{detail, code, request_id}`.
-
-| Method | Path | Purpose |
+| Target | Command | Docs |
 |---|---|---|
-| POST | `/auth/login`, `/auth/refresh` | email + password → access/refresh tokens; refresh |
-| GET | `/auth/me` | who am I + effective permissions |
-| GET | `/traces`, `/traces/{id}`, `/usage` | request/ingest trace log and per-day aggregates (`traces:read`) |
-| GET/POST/PATCH/DELETE | `/users`, `/roles` (`GET /permissions`) | admin: manage users, roles and their permissions (`users:manage`, `roles:manage`) |
-| POST/GET | `/api-keys`, `/api-keys/{id}/revoke` | admin (`apikeys:manage`): create (secret shown once), list, revoke API keys for machine clients, sent as `X-API-Key` or `Bearer` ([docs/api.md](docs/api.md#authentication-for-services-api-keys)) |
-| POST | `/documents` | multipart upload → `{document, job}` (413 over the size limit, 415 for bad types) |
-| GET | `/documents`, `/documents/{id}`, `/documents/{id}/chunks` | list / detail with jobs / indexed chunks |
-| PUT | `/documents/{id}` | upload a new version; only changed chunks are re-embedded |
-| DELETE | `/documents/{id}` | removes the row, chunks, vectors and the stored file |
-| GET | `/jobs/{id}` | `pending → running → done \| failed` (+ error) |
-| POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
-| POST | `/chat/stream` | same body; Server-Sent Events `sources`, `token`*, `done` / `error` ([docs/api.md](docs/api.md)) |
-| GET | `/capabilities` | server version, enabled retrieval modes, limits and features (any valid credential, no secrets) |
-| GET/PATCH | `/settings`, `/settings/audit`, `/settings/reindex`, `/settings/test/{service}` | admin Settings window: runtime defaults, write-only secrets, audit log (`settings:read` to view, `settings:manage` to change; [ADR-0008](docs/adr/0008-runtime-settings.md)) |
-| POST | `/documents/from-url` | ingest from an http(s) or `s3://` link (`documents:write`; [configuration](docs/configuration.md#file-storage-and-url-ingest)) |
-| GET/POST | `/cache/stats`, `/cache/purge` | query-cache counters and Redis keyspace (`traces:read`); purge all layers (`cache:manage`) |
-| POST | `/search` | `{query, top_k?, mode?, fusion?, neighbors?, document_ids?, include_text?}` → ranked `results[]` (no LLM; `search:use`; see [docs/api.md](docs/api.md)) |
-| GET | `/health` | db / redis / the active vector store (critical); `vector_settings` (stored index matches the configuration) and ollama (informational) |
+| Docker Compose, from source | `make up` | [deployment.md](docs/deployment.md) |
+| Docker Compose, published images | `docker compose -f docker-compose.image.yml up -d` | [deployment.md](docs/deployment.md#run-the-published-images) |
+| Kubernetes (Kustomize overlays `dev`, `prod`, `kind`) | `make deploy ENV=dev` (render only: `make deploy-dry ENV=prod`) | [deployment.md](docs/deployment.md#kubernetes-overview), [kubernetes-local.md](docs/kubernetes-local.md) |
+| Headless (API only, no dashboard) | `k8s/overlays/headless`, or `make up-api` on Compose | [api.md](docs/api.md#headless-deployment-api-only) |
 
-## Kubernetes
+## Status and limits
 
-`k8s/` holds a Kustomize base (api, worker, beat, frontend, migrate Job, Postgres, Redis, Chroma, a
-shared uploads volume) and `dev` / `prod` overlays (prod adds replicas, HPAs and an Ingress; dev adds
-an in-cluster Ollama component).
+Verified means observed on a running stack with real dependencies; the full table is in [docs/status.md](docs/status.md).
 
-```bash
-make images REGISTRY=ghcr.io/you/rag-pipeline TAG=v0.1.0   # linux/amd64 builds (PLATFORM=linux/arm64 for local arm64)
-make deploy-dry ENV=prod                                      # render only
-make deploy ENV=dev                                           # delete+apply migrate job, apply, wait
-```
+| Area | State |
+|---|---|
+| Ingest, parse (native PDF text, OCR, DOCX, txt/md), chat with citations, streaming, search modes, cache, auth and RBAC, Settings window, traces and usage | Verified on Docker Compose with real Postgres, Redis, Chroma, Ollama and OpenRouter |
+| Kubernetes on kind (all pods, migrations, login, ingest, chat, HPA 2 -> 8, pod-delete survival, S3 mode) | Verified on kind, arm64 images |
+| Compose-from-clean-clone and local image build and run | Verified on Apple Silicon (arm64) |
+| Vision parsing of scanned pages with a live provider call | Partial: passed in earlier runs, not re-run after the switch to pypdfium2 |
+| amd64 images and the release workflow (multi-arch build, GHCR push, attestation) | Not yet run on GitHub CI; the amd64 backend build was not completed locally |
+| In-cluster Ollama, a real ReadWriteMany storage class, the untrimmed `prod` replica counts | Not run |
+| Worker throughput with many workers, Chroma beyond ~3k vectors per collection | Not measured |
+| Retrieval quality | Measured on one corpus with 12 labelled questions: hybrid did not beat keyword-only there. Treat as indicative |
+| Known gaps | No login rate-limiting, no per-user document ownership, tokens are not revocable before expiry beyond deactivating the user |
 
-`headless` serves only the API (no dashboard) behind an Ingress, and `k8s/components/s3` keeps uploads in S3
-instead of a shared volume (the multi-node answer). To try it on a laptop, follow
-[docs/kubernetes-local.md](docs/kubernetes-local.md) (kind, with a `k8s/overlays/kind` overlay that uses locally
-built images and the host's Ollama; the Ingress needs your cluster's `ingressClassName`).
+Benchmarks are laptop numbers, not capacity planning. Until version 1.0 the API and settings may change between minor versions ([CHANGELOG](CHANGELOG.md)).
 
-Things you must provide: real values in `k8s/base/secrets.yaml` (including a random `SECRET_KEY` of 32+ characters — the API refuses to start in prod with a placeholder — and the bootstrap `ADMIN_*`) (use sealed-secrets/SOPS), image
-tags in the overlay, an ingress host/class, and, when running more than one API/worker replica, either a **ReadWriteMany** storage class for the uploads
-volume (the API writes files the workers read) or `STORAGE_BACKEND=s3` via `k8s/components/s3`. A ReadWriteOnce volume
-does not fail across nodes, it pins every api/worker pod to the volume's node.
+## Documentation
 
-## Quality gates and tests
+[Documentation index](docs/README.md): [architecture](docs/architecture.md), [HTTP API](docs/api.md), [configuration](docs/configuration.md), [deployment](docs/deployment.md), [Kubernetes on kind](docs/kubernetes-local.md), [performance](docs/performance.md), [status](docs/status.md) and the [decision records](docs/adr/).
 
-```bash
-make check     # ruff + strict mypy + pytest (backend) · eslint + prettier + tsc + vitest (frontend)
-```
+## Contributing
 
-Automated tests use fakes for external services; separate real-service smoke tests are run before a
-change is considered done (see the next section).
+Issues and pull requests are welcome. Setup, conventions and the PR checklist are in [CONTRIBUTING.md](CONTRIBUTING.md); `make check` runs lint, strict typing and the test suites (backend and frontend). Coding agents: [AGENTS.md](AGENTS.md). Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Verified status
+## Security
 
-Honest accounting of what has been exercised against real services versus only unit-tested:
+Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Do not open public issues for them.
 
-| Area | How it was exercised | Result |
-|---|---|---|
-| Parse (PDF text layer, OCR, vision, DOCX, txt/md) | real OpenRouter, Tesseract, docling Word backend; native PDF text on the real Selling Guide chapters (worker log: 44/44 pages native, 0 via backend) | passed |
-| Ingest pipeline (Celery) | real worker, Postgres, Chroma, Ollama embeddings | passed |
-| Documents / jobs API | real API + worker over HTTP | passed |
-| Chat (retrieval + LLM) | real OpenRouter free model, cited answers | passed |
-| Incremental update | real stack: edit 1 paragraph of a 126-chunk doc, `PUT` → **1** chunk re-embedded, 124 reused | passed |
-| Incremental update on real revisions | Fannie Mae Selling Guide ch. B3-5, Oct 8 → Nov 5 2025 (real PDFs, real OCR): `PUT` reused **173/342** chunks, embedded 169 (a rebuild embeds 342) | passed (answer check after the update not run: LLM rate-limited) |
-| Vector store options (Chroma / pgvector, metric, HNSW / IVFFlat) | one contract-test suite on **both** stores against real Chroma + Postgres/pgvector (metric orderings and score values, filters, incremental-update primitives, `pg_indexes`, `EXPLAIN`), plus the real stack on chroma-l2, chroma-cosine, pgvector hnsw and pgvector ivfflat: 388 real chunks, mismatch detected at startup and fixed with `manage reindex` | passed (retrieval 8/12, hit@1 7/12 on all four: identical because the data is tiny and the embeddings normalised, so this shows nothing about ANN recall; the planner ignores both indexes at 388 rows, forced-index recall@5 vs exact: hnsw 1.00, ivfflat 0.97) |
-| Retrieval modes (semantic / keyword BM25 / hybrid RRF + weighted) | unit tests with hand-computed fusion and BM25 values; integration tests on real Postgres + real Chroma **and** pgvector (exact-ID query missed by semantic found by keyword/hybrid, paraphrase missed by keyword found by semantic/hybrid, filters, de-duplication, overrides, drift); real stack (Chroma and pgvector) on 388 real chunks, 12 labelled questions, 3 runs each, 0 LLM calls: hit/hit@1 semantic 8/7, BM25 keyword **10**/7, hybrid RRF 9/7, hybrid weighted 9/6, plain `ts_rank_cd` 5/1 | passed (see `tmp/smoke_tests/23-retrieval-modes-result.md`; **hybrid did not beat keyword-only on this corpus**; the section-ID question is found by keyword (rank 1) but hybrid RRF ranks it 20th; only 12 questions on one corpus, so differences of 1-2 questions are not significant; the dashboard has no mode control yet) |
-| Dashboard | real Chromium driving upload → live job → chat → delete | passed |
-| Traces + usage dashboard | real stack + real Chromium: real ingest (ok and corrupt-PDF failure), chat (LLM rate-limited → error traces), API/UI numbers cross-checked, charts reviewed in light/dark | passed (token chart with real token data not seen: LLM returned only 429s) |
-| Langfuse tracing | traces read back from a real Langfuse project | passed |
-| **Docker Compose, all services as containers** | `docker compose up --build`, requests through the containerised frontend | passed (Ollama must run on the host) |
-| Backend image size | 5.72 GB → 1.10 GB (torch removed via docling-slim; uv cache kept out of the layer; thin `chromadb-client` instead of the full server package); parsers + stack re-verified | passed (auth smoke 45/47: the 2 LLM-dependent checks hit the free-tier 429) |
-| Production frontend image (nginx) | built, served SPA routes and proxied `/api` to a live backend | passed |
-| Kubernetes manifests (kind overlay) | re-run 2026-11-15 on the current code (Alembic head 0010) on real kind clusters, arm64 images: all pods Ready, migrate Job to 0010 (idempotent), login, upload -> worker ingest, health, semantic/keyword/hybrid search, `/v1` + deprecated aliases, a real `/chat` answer with a citation and `/chat/stream` (also through the frontend nginx and ingress-nginx, not buffered), query cache hit/miss/bypass/invalidation, API keys, Settings window (live change on 2 api replicas, write-only secret, reindex confirm), pod-delete survival (api, worker, db, chroma, redis), 2 workers. Bugs found and fixed: the api could start before the migration and never seed the bootstrap admin (now a `wait-for-migrate` init container), plus the earlier Chroma service-link crash and wrong Chroma mount | passed. **Not run:** in-cluster Ollama (host Ollama was used), the untouched 3+3 replica `prod` numbers (applied trimmed to fit 8 GiB), a real RWX StorageClass |
-| Kubernetes HPA / ingress / multi-node | metrics-server on kind; prod HPA scaled the api 2 -> 8 under a 240 s in-cluster search load (13,254 requests, 0 errors) and back to 2 in ~3m40s; `prod` (trimmed) and `headless` overlays reached through ingress-nginx; on a 2-worker-node cluster an RWO uploads volume pins every api/worker pod to one node (a worker forced elsewhere stays Pending), while `k8s/components/s3` (S3 mode, Floci) ran api and worker on different nodes | passed / measured; see [docs/kubernetes-local.md](docs/kubernetes-local.md) |
-| Auth + RBAC (users, roles, permissions) | real stack through the containerised frontend: 47 checks incl. real Chromium UI flows, forged/expired/wrong-key tokens, live role edits and deactivation | passed (no login rate-limiting; no per-user document ownership; tokens are not revocable before expiry beyond deactivation) |
-| Load / scale behaviour (many workers) | 2 workers ingesting 6 documents (only one picked up tasks: tiny documents); 3 workers starved an 8 GiB Docker VM; api autoscaling measured (above) | worker throughput **not measured** |
+## Data and privacy
 
-Smoke-test scripts and reports are kept locally under `tmp/` (gitignored); the automated suite
-(`make check`) runs 1,470+ backend and 320+ frontend tests with fakes for external services.
+Documents are processed on your own infrastructure. Embeddings go to your own Ollama by default; chat (and optional vision parsing) calls go only to the provider you configure, with the retrieved passages in the prompt. This project adds no telemetry of its own, Langfuse tracing is opt-in, and question text is stored in traces only when you enable it. The Fannie Mae Selling Guide chapters used for benchmarks and screenshots are public documents and are not bundled here.
 
-## Repository map
+## License
 
-`backend/app` — `routers/` (HTTP), `services/` (parse, chunk, embed, retrieve, QA, ingest, cleanup),
-`tasks/` (Celery), `db/` (SQLAlchemy + Alembic), `schema/` (pydantic) · `frontend/src` — API client,
-zustand store, pages · `k8s/` — manifests · `docs/` — architecture, ADRs, API and config reference, benchmark ([index](docs/README.md)) · `context/` — founding
-scope. Contributor and agent guidance: [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md).
+[MIT](LICENSE) (c) 2026 Aayush Joshi.

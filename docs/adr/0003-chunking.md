@@ -2,7 +2,7 @@
 
 - Status: **Accepted**
 - Date: 2026-09-09
-- Status note: decision made while ticket 5 (chunking service) was still `open`, to pin the
+- Status note: decision made before the chunking service was implemented, to pin the
   strategy before implementation.
 
 ## Context
@@ -27,7 +27,7 @@ choice:
 ## Decision
 
 Adopt **content-defined chunking (CDC)** as the default strategy in the chunking service
-(`backend/app/services/chunking.py`, ticket 5):
+(`backend/app/services/chunking.py`):
 
 - Chunk boundaries are decided by a **rolling hash over a local window** (e.g. buzhash/fastcdc
   style), marking a boundary when `hash(window) & mask == 0`.
@@ -52,7 +52,7 @@ Rejected alternatives:
 - The chunker is deterministic (a pure function of input text + config) — required for both
   stability and testability.
 - `ChunkSpec` gains a `content_hash` field (and retains stable `index` ordering).
-- Ingest (ticket 6) runs the chunked text through the incremental-update path; the chunking
+- Ingest runs the chunked text through the incremental-update path; the chunking
   ticket implements the primitive (`chunk_text` returning `ChunkSpec`s), the diff/align logic
   lands in the ingest ticket.
 - Add a **chunker fingerprint** (strategy + `chunk_size` + `chunk_overlap` + hash seed) persisted
@@ -67,7 +67,7 @@ Baking the rolling-hash chunker in as a vendored/self-contained module vs. addin
 (e.g. `fastcdc`, `borg`'s algorithms) — keep it dependency-free with our own small buzhash
 implementation unless correctness/performance testing says otherwise.
 
-## Update 2026-11-14 — word-boundary cuts and neighbour context (ticket 28)
+## Update 2026-11-14 — word-boundary cuts and neighbour context
 
 **Problem (measured on the real Fannie Mae Selling Guide chapters).** The v1 chunker cut at
 arbitrary characters: 303 of 335 chunks of the Nov 5 B3-5 chapter started or ended mid-word

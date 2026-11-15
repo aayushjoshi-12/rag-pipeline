@@ -14,13 +14,22 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
   mismatched index; fix it with `python -m app.manage reindex` (see
   [Changing the vector store](#changing-the-vector-store)).
 
+## Providers at a glance
+
+Everything is swappable by configuration: `LLM_PROVIDER` (openrouter | openai | anthropic), `EMBEDDING_PROVIDER` (ollama | openai) and
+`PARSER_PROVIDER` (openrouter | openai | anthropic | ocr). Free-tier OpenRouter models come and go: if chat returns a 502, check
+`DEFAULT_LLM_MODEL` against OpenRouter's current model list. `VECTOR_STORE` (chroma | pgvector), `VECTOR_METRIC`, `VECTOR_INDEX`
+(hnsw | ivfflat | none) and the HNSW / IVFFlat knobs choose where vectors live and how they are indexed; changing them on existing data is
+a `python -m app.manage reindex`. `RETRIEVAL_MODE` (semantic | keyword | hybrid, also per request on `POST /chat`), `RETRIEVAL_KEYWORD_METHOD`,
+`RETRIEVAL_FUSION` and the BM25 / RRF / weight knobs choose how chunks are found; `semantic` is the default. The table below lists them all.
+
 | Key | Values | Default | Scope | Meaning |
 |---|---|---|---|---|
 | `CHUNK_SIZE` | integer > 0 (chars) | `1000` | index-time | Hard **maximum** chunk length. Chunks average roughly 0.5 x this (~525 chars at 1000) and are cut at word starts, preferably at sentence ends / blank lines (ADR-0003). |
 | `CHUNK_OVERLAP` | integer, `0 <= v < CHUNK_SIZE` (chars) | `100` | index-time | **Minimum** chunk length (nothing is repeated between chunks; the name is kept for compatibility). A smaller minimum resynchronises cut points faster after an edit but allows smaller chunks. |
 | `RETRIEVAL_NEIGHBORS` | integer `0..5` | `1` | query-time (per-request `neighbors` on `POST /chat`) | Besides each search hit, also give the LLM the N chunks before and after it from the same document (de-duplicated, in reading order, bounded by the 12,000-char prompt context budget; hits always keep priority). `0` = hits only. Response `sources[].is_hit` is `false` for context-only chunks. |
 | `DEFAULT_TOP_K` | integer >= 1 | `5` | query-time (per-request `top_k`) | Number of search hits (before neighbour expansion). |
-| `RETRIEVAL_MODE` | `semantic`, `keyword`, `hybrid` | `semantic` | query-time (per-request `mode` on `POST /chat`) | How chunks are found. `semantic` = embeddings only (the behaviour before ticket 23). `keyword` = Postgres full-text search with BM25 re-scoring, no embedding call. `hybrid` = both, fused. See [Retrieval modes](#retrieval-modes). |
+| `RETRIEVAL_MODE` | `semantic`, `keyword`, `hybrid` | `semantic` | query-time (per-request `mode` on `POST /chat`) | How chunks are found. `semantic` = embeddings only (the original behaviour). `keyword` = Postgres full-text search with BM25 re-scoring, no embedding call. `hybrid` = both, fused. See [Retrieval modes](#retrieval-modes). |
 | `RETRIEVAL_KEYWORD_METHOD` | `bm25`, `postgres_fts` | `bm25` | query-time | `bm25`: true BM25 over an FTS candidate pool. `postgres_fts`: plain `ts_rank_cd` (faster, weaker ranking). Used by `keyword` and `hybrid`. |
 | `RETRIEVAL_FUSION` | `rrf`, `weighted` | `rrf` | query-time (per-request `fusion`) | How `hybrid` merges the two ranked lists. Ignored (but validated) in other modes. |
 | `RETRIEVAL_RRF_K` | integer `1..1000` | `60` | query-time | RRF constant: `score = sum 1/(k + rank)`. Larger = flatter (ranks matter less), smaller = the top ranks dominate. 60 is the value from the original RRF paper. |
@@ -345,7 +354,6 @@ character get new content hashes and are re-embedded; unchanged chunks are kept 
 rebuilds the *vector store* from the stored chunk text and therefore does **not** remove ligatures that are already in it.
 Set `PARSE_NORMALIZE_TEXT=false` to keep the text exactly as extracted (index-time: affects documents ingested afterwards).
 
-<!-- ticket 34: POST /search -->
 ## `POST /search` and neighbour context
 
 `POST /search` ([docs/api.md](api.md)) takes the same query-time knobs as `/chat` (`mode`, `fusion`, `top_k`,
@@ -359,7 +367,6 @@ Set `PARSE_NORMALIZE_TEXT=false` to keep the text exactly as extracted (index-ti
 - Each call is traced as kind `search` (`meta`: `mode`, `fusion` (hybrid), `top_k`, `neighbors`, `document_filter`,
   `include_text`; the query only when `TRACE_CAPTURE_CONTENT=true`) and shows in Traces and Usage under type
   "Search".
-<!-- ticket 32: LLM cost and the Usage page -->
 ## LLM cost and the Usage page
 
 Each chat trace stores `cost_usd` (USD). **Unknown is `NULL`, never 0**: the dashboard shows "—" for it.
@@ -375,7 +382,7 @@ Each chat trace stores `cost_usd` (USD). **Unknown is `NULL`, never 0**: the das
 - `GET /usage/credits` (needs `traces:read`) reads the OpenRouter key balance (`GET /key`) server-side, caches it 60 s, and returns `available: false` with a reason for other providers, a missing key or an unreachable endpoint. The API key is never returned.
 - `GET /usage/insights?days=&kind=` returns the aggregates behind the Usage tabs (cost by model, latency histogram, error reasons, weekday/hour heatmap, no-hit rate, hits per query, most-cited documents, chunk reuse, ingest duration by mode). Chat traces store the ids (never the text) of the documents an answer was grounded on in `meta.cited_document_ids`.
 
-### Output budget (`LLM_MAX_TOKENS`) and embedding usage (tickets 40, 45)
+### Output budget (`LLM_MAX_TOKENS`) and embedding usage
 
 | Key | Values | Default | Scope | Meaning |
 |---|---|---|---|---|
@@ -384,9 +391,7 @@ Each chat trace stores `cost_usd` (USD). **Unknown is `NULL`, never 0**: the das
 
 - Embedding tokens are what the provider reported (Ollama `prompt_eval_count`, OpenAI `usage.total_tokens`); nothing is estimated. A `search` trace records the query embedding (`prompt_tokens`, `completion_tokens = 0`, `meta.embedding.tokens`); a cached embedding or retrieval is `0` with `meta.embedding.cached = true`. A `chat` trace keeps the LLM's tokens and puts the query embedding in `meta.embedding` only. An `ingest` trace records the tokens of the chunks it embedded (`meta.embedding_tokens`; `0` when an incremental update re-embedded nothing). Keyword search embeds nothing and records none.
 - Traces table: a number is what the provider reported, `cached` means the cache answered (nothing was spent), `n/a` means a successful call without a reported count/price (old traces too), and `—` means not applicable (failed without usage, keyword search).
-<!-- end ticket 32 -->
 
-<!-- ===== Ticket 35: API keys ===== -->
 
 ## API keys (service accounts)
 
@@ -402,7 +407,6 @@ API keys need **no new settings**: they are stored in Postgres (`api_keys`, migr
 | Per-key rate limit | not implemented | n/a | rate-limit at the gateway/ingress |
 
 See [`docs/api.md`](./api.md#authentication-for-services-api-keys) for the security model and a curl/Python recipe.
-<!-- ===== end Ticket 35 ===== -->
 
 ## CORS
 
@@ -415,7 +419,7 @@ Credentials are never allowed cross-origin (auth is by header), and the allowed 
 
 ## Memory and limits
 
-Measured on a 7.7 GiB Docker VM (tickets 48/49; raw numbers in `tmp/smoke_tests/48-49-memory-result.md`). The VM
+Measured on a 7.7 GiB Docker VM (raw numbers in `tmp/smoke_tests/48-49-memory-result.md`). The VM
 kernel log had shown global OOM kills of Chroma (5.7 GB and 5.5 GB resident) and of the api (3.3 GB): with no memory
 limit the kernel picks whichever process is biggest, not the one that ran away.
 
@@ -423,7 +427,7 @@ limit the kernel picks whichever process is biggest, not the one that ran away.
 |---|---|---|---|---|
 | chroma | ~70 MiB (800 vectors) | vectors (~4x their raw float32 size, see rule), **every collection ever written to, even after it is deleted** | `mem_limit 1536m` | 512Mi / 1Gi |
 | api | ~160 MiB | uploads stream to disk in 1 MiB chunks (`MAX_UPLOAD_SIZE_BYTES`); ~275 MiB after three 200-page ingests | `mem_limit 1g` | 256Mi / 1Gi (prod 2Gi) |
-| worker | ~445 MiB at `WORKER_CONCURRENCY=2` (was ~1.1 GiB with Celery's default of one child per host CPU) | one ingest per child; after three 200-page text-PDF ingests (1827 chunks each) ~570 MiB (ticket 52 re-measured: 20 small ingest+delete cycles move the worker 357 -> 369 MiB and the api 195 -> 196 MiB anon, i.e. no leak; six 500 KB / ~600-chunk documents: worker 473 -> 550 anon, api 197 -> 215, still drifting up slowly: probably allocator high-water, not proven either way), a 200-page *scanned* PDF ~280 MiB per process, a DOCX +45 MiB | `mem_limit 3g` | 512Mi / 3Gi (prod 4Gi) |
+| worker | ~445 MiB at `WORKER_CONCURRENCY=2` (was ~1.1 GiB with Celery's default of one child per host CPU) | one ingest per child; after three 200-page text-PDF ingests (1827 chunks each) ~570 MiB (re-measured: 20 small ingest+delete cycles move the worker 357 -> 369 MiB and the api 195 -> 196 MiB anon, i.e. no leak; six 500 KB / ~600-chunk documents: worker 473 -> 550 anon, api 197 -> 215, still drifting up slowly: probably allocator high-water, not proven either way), a 200-page *scanned* PDF ~280 MiB per process, a DOCX +45 MiB | `mem_limit 3g` | 512Mi / 3Gi (prod 4Gi) |
 | beat | ~176 MiB (cold-start peak ~180 MiB; it imports every task module through `include=`) | nothing: a tick only publishes a message | `mem_limit 384m` | 192Mi / 384Mi |
 
 * **Chroma sizing rule.** `memory ~= 150 MiB + 16 bytes x embedding dimension x vectors`. 512Mi/1Gi therefore holds about
@@ -433,7 +437,7 @@ limit the kernel picks whichever process is biggest, not the one that ran away.
   collection keeps the old graph too (small collections: ~3 MiB each with the default config, ~0.15 MiB with the
   bounded cache below; measured 2768 x 1024 vectors: ~15 MiB per drop-and-recreate reindex). Therefore:
   `reindex` no longer drops a Chroma collection when nothing drifted: it upserts every vector and deletes the ids that
-  are no longer chunks (ticket 51; measured **15.0 -> 0.5 MiB per reindex**, though a rewrite in place takes longer, ~12 s vs ~3 s
+  are no longer chunks (measured **15.0 -> 0.5 MiB per reindex**, though a rewrite in place takes longer, ~12 s vs ~3 s
   for 2768 vectors). It still drops and recreates when `verify()` reports drift (metric, HNSW parameters, dimension),
   which is the only way to apply new index parameters, and that path still leaves one index behind: restart Chroma
   afterwards (`docker compose restart chroma`, `kubectl -n rag-pipeline rollout restart deploy/chroma`; the data is on
@@ -441,7 +445,7 @@ limit the kernel picks whichever process is biggest, not the one that ran away.
   With the memory limit set, the worst case is that Chroma alone is OOM-killed and restarted.
 * **The image tag is pinned** (`chromadb/chroma:1.5.9` in Compose, `k8s/base/chroma`, CI; recorded in
   `chroma/config.yaml`) because this behaviour is version dependent. Bump all places together and re-measure.
-* **Tests never touch the dev Chroma** (ticket 50): `make check` runs the Chroma tests on a throwaway `chroma-test`
+* **Tests never touch the dev Chroma**: `make check` runs the Chroma tests on a throwaway `chroma-test`
   container (:8002, tmpfs). A dev Chroma that was used by older test runs holds thousands of orphan HNSW segment
   directories on its volume (6928 / 260 MB seen) and keeps their indexes in memory. One-off cleanup, only after
   `docker compose stop chroma api worker`: back up nothing (vectors are rebuildable), `docker volume rm rag-pipeline_chroma-data`,

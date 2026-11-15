@@ -53,10 +53,10 @@ kind delete cluster --name rag-kind
   containers or give Docker 12+ GiB. Chroma sizing: `150 MiB + 16 bytes x dimension x vectors` (512Mi/1Gi = ~40k vectors
   of 1024 dims); see `docs/configuration.md` "Memory and limits" for the measurements and the Chroma delete leak.
   The old kernel-log OOM kills of Chroma (5.7 GB) and uvicorn (3.3 GB) were global VM kills, which kubelet reports as
-  `OOMKilled` for the one unexplained api pod of the first run (ticket 48).
+  `OOMKilled` for the one unexplained api pod of the first run.
 - **Probes.** The api has a `startupProbe` (up to 5 min) and 5 s timeouts on every probe: `/health` pings
   db/redis/chroma/ollama and the 1 s default produced `context deadline exceeded` while the node pulled images.
-  Not yet re-verified on a throttled kind node (ticket 49).
+  Not yet re-verified on a throttled kind node.
 - **Uploads volume, single node.** kind's default StorageClass (`rancher.io/local-path`) is ReadWriteOnce and
   node-local; api and worker share the files because they are on the one node.
 - **Uploads volume, several nodes (measured on 2 worker nodes).** The local-path PV carries a node affinity, so the

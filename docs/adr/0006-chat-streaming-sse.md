@@ -1,7 +1,7 @@
 # 0006 — Chat streaming over Server-Sent Events
 
 - Status: **Accepted**
-- Date: 2026-11-15 (ticket 38)
+- Date: 2026-11-15
 
 ## Context
 

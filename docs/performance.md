@@ -29,21 +29,21 @@ comparisons, not capacity planning. Raw data and methods are linked from each se
 | Cache miss overhead | +0.3 ms keyword, +1.6 ms semantic, +3.9 ms hybrid (p50) | all-unique queries, 1 client | cache benchmark |
 | `/chat` cold (real LLM) | median 3,173 ms, max 6,600 ms | 12 questions, free reasoning model | cache benchmark |
 | `/chat` cache hit | p50 25 ms, p95 67 ms, p99 95 ms, 261 req/s | 180 requests, 8 clients, 100% hits | cache benchmark |
-| Ingest, 42-page chapter (372 chunks) / 53-page chapter (405 chunks) | 20.6 s / 21.7 s end to end | both at once, native PDF text, local `mxbai-embed-large` | worker log, ticket 37 run |
+| Ingest, 42-page chapter (372 chunks) / 53-page chapter (405 chunks) | 20.6 s / 21.7 s end to end | both at once, native PDF text, local `mxbai-embed-large` | worker log, measured runrun |
 | PDF text extraction, 42-53 pages | < 1 s | native text layer, no OCR | worker log |
-| Retrieval quality, 12 labelled questions, top 5 | semantic 8/12, keyword BM25 10/12, hybrid RRF 9/12 (first-place: 7/7/7) | 388 chunks; 3 identical runs; a 1-2 question difference is not significant | ticket 23 report |
-| Retrieval latency by mode (retriever only) | semantic 64 ms, BM25 17 ms, hybrid RRF 52 ms | Chroma; pgvector semantic 75 ms | ticket 23 report |
-| Chat answer cost (paid model) | $0.0000139 for 348 in / 174 out tokens | meta-llama/llama-3.1-8b-instruct via OpenRouter | trace row, ticket 45 smoke |
-| Streaming: sources / first token / done | 0.09-0.25 s / 0.98 s / 4.4 s (small paid model, in a kind cluster); first token ~4.5-5 s on the free reasoning model | `/chat/stream` | tickets 38, 20 |
-| Kubernetes autoscaling | API 2 -> 7 -> 8 pods (cap), 13,254 requests in 240 s (~55 req/s), 0 errors, scale-down to 2 in ~3m40s | kind on the same laptop, cache bypassed | ticket 20/25 kind report |
-| API memory | 167 -> 193 MB over 240 requests (flat after the Chroma-client leak fix); peak ~360 MB under the autoscaler load | idle/steady vs load | tickets 37, 20 |
-| Settings propagation across replicas | 2.1-2.9 s (limit 5 s) | 2 API pods | ticket 43 smoke |
-| Chunk reuse between two real document versions | 46.3% identical (CDC) vs 0-1% (fixed-size) | Selling Guide B3-5, v1 vs v2 | ticket 21 report |
+| Retrieval quality, 12 labelled questions, top 5 | semantic 8/12, keyword BM25 10/12, hybrid RRF 9/12 (first-place: 7/7/7) | 388 chunks; 3 identical runs; a 1-2 question difference is not significant | measured runreport |
+| Retrieval latency by mode (retriever only) | semantic 64 ms, BM25 17 ms, hybrid RRF 52 ms | Chroma; pgvector semantic 75 ms | measured runreport |
+| Chat answer cost (paid model) | $0.0000139 for 348 in / 174 out tokens | meta-llama/llama-3.1-8b-instruct via OpenRouter | trace row, measured runsmoke |
+| Streaming: sources / first token / done | 0.09-0.25 s / 0.98 s / 4.4 s (small paid model, in a kind cluster); first token ~4.5-5 s on the free reasoning model | `/chat/stream` | measured run|
+| Kubernetes autoscaling | API 2 -> 7 -> 8 pods (cap), 13,254 requests in 240 s (~55 req/s), 0 errors, scale-down to 2 in ~3m40s | kind on the same laptop, cache bypassed | measured runkind report |
+| API memory | 167 -> 193 MB over 240 requests (flat after the Chroma-client leak fix); peak ~360 MB under the autoscaler load | idle/steady vs load | measured run|
+| Settings propagation across replicas | 2.1-2.9 s (limit 5 s) | 2 API pods | measured runsmoke |
+| Chunk reuse between two real document versions | 46.3% identical (CDC) vs 0-1% (fixed-size) | Selling Guide B3-5, v1 vs v2 | measured runreport |
 
 Honest limits: one machine, 777 chunks, synthetic repeat distribution, a free reasoning model for the cold chat numbers, and 12 labelled questions for retrieval quality.
 Retrieval time grows with corpus size; the *saved* time (the embedding call) mostly does not. Memory is covered in the next section.
 
-## Memory (measured after the memory work, tickets 48/49)
+## Memory (measured after the memory work)
 
 | What | Before | After | Notes |
 |---|---|---|---|

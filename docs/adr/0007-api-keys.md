@@ -1,7 +1,7 @@
 # 0007 — API keys for machine clients
 
 - Status: **Accepted**
-- Date: 2026-11-15 (ticket 35)
+- Date: 2026-11-15
 
 ## Context
 

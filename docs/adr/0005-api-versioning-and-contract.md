@@ -1,7 +1,7 @@
 # 0005 — API versioning and contract
 
 - Status: **Accepted**
-- Date: 2026-11-15 (ticket 36)
+- Date: 2026-11-15
 
 ## Context
 

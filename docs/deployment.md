@@ -77,6 +77,28 @@ makes already-stored secrets unreadable, so re-enter them afterwards.
    re-run is harmless. Migrations only move forward: to go back, restore the backup and start the older version.
 4. Check `GET /health`.
 
+## Kubernetes overview
+
+`k8s/` holds a Kustomize base (api, worker, beat, frontend, migrate Job, Postgres, Redis, Chroma, a
+shared uploads volume) and `dev` / `prod` overlays (prod adds replicas, HPAs and an Ingress; dev adds
+an in-cluster Ollama component).
+
+```bash
+make images REGISTRY=ghcr.io/you/rag-pipeline TAG=v0.1.0   # linux/amd64 builds (PLATFORM=linux/arm64 for local arm64)
+make deploy-dry ENV=prod                                      # render only
+make deploy ENV=dev                                           # delete+apply migrate job, apply, wait
+```
+
+`headless` serves only the API (no dashboard) behind an Ingress, and `k8s/components/s3` keeps uploads in S3
+instead of a shared volume (the multi-node answer). To try it on a laptop, follow
+[kubernetes-local.md](kubernetes-local.md) (kind, with a `k8s/overlays/kind` overlay that uses locally
+built images and the host's Ollama; the Ingress needs your cluster's `ingressClassName`).
+
+Things you must provide: real values in `k8s/base/secrets.yaml` (including a random `SECRET_KEY` of 32+ characters — the API refuses to start in prod with a placeholder — and the bootstrap `ADMIN_*`) (use sealed-secrets/SOPS), image
+tags in the overlay, an ingress host/class, and, when running more than one API/worker replica, either a **ReadWriteMany** storage class for the uploads
+volume (the API writes files the workers read) or `STORAGE_BACKEND=s3` via `k8s/components/s3`. A ReadWriteOnce volume
+does not fail across nodes, it pins every api/worker pod to the volume's node.
+
 ## Kubernetes with the published images
 
 The manifests reference the placeholder images `rag-pipeline/backend` and `rag-pipeline/frontend`. Point them at the

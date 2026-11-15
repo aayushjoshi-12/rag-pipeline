@@ -39,7 +39,7 @@ Explored alternatives for DOCX: `mammoth` (docx→HTML, extra conversion step, w
 `markitdown` (lighter, weaker layout), `unstructured` (heavy, PDF parsing historically flaky).
 Docling was kept for DOCX→MD fidelity and active maintenance.
 
-**Native text first (ticket 30).** A born-digital PDF already carries an exact text layer, so
+**Native text first.** A born-digital PDF already carries an exact text layer, so
 `PDF_TEXT_SOURCE=auto` (default) uses it per page when the page has at least `PDF_NATIVE_MIN_CHARS`
 (40) characters and sends only pages without one (scans) to the configured OCR/vision backend. The
 backend is built lazily, so an all-text PDF needs no API key and no LLM/OCR call. `native` never
@@ -122,7 +122,7 @@ PDF format, so no new native stack is added and the image is about 100 MB smalle
   `store_shrink` workaround is gone. A synthetic 200-page scan peaks at about 250 MiB (was about 256 MiB for the same file
   with PyMuPDF); a 200-page text PDF at about 132 MiB (was 165 MiB).
 - **Thread safety.** PDFium is not safe for concurrent use, so a single lock still serialises all calls.
-- **Text differences.** pdfium expands PDF ligatures itself (no "fi"/"fl" code points are produced; the ticket 33
+- **Text differences.** pdfium expands PDF ligatures itself (no "fi"/"fl" code points are produced; the text-normalisation
   normalisation still runs for other sources) and joins some table-cell lines with a space where MuPDF kept a newline.
   Measured on four real Selling Guide chapters: page text similarity 0.9967 to 0.9991 (mean), identical retrieval
   results, identical chunk reuse on a version update. Details are kept in the project's local smoke reports.

@@ -1,6 +1,6 @@
 # Evals for the RAG framework — brainstorm (not a decision)
 
-Status: **Brainstorm, not a decision** (ticket 27 is open) — ideas only, captured 2026-11-14 for a later ticket (27). Nothing here is built. The only
+Status: **Brainstorm, not a decision** (the evals work is not started) — ideas only, captured 2026-11-14 for later work. Nothing here is built. The only
 "eval" today is an ad-hoc script (`tmp/smoke_tests/search-real-world-smoke.py`, 14 hand-labelled
 questions over two real Fannie Mae chapters) — it is the seed of the golden-set idea below.
 
@@ -9,7 +9,7 @@ questions over two real Fannie Mae chapters) — it is the seed of the golden-se
 | Layer | Question it answers | Candidate metrics |
 |---|---|---|
 | Parse | Did we read the document correctly? | CER/WER vs ground-truth text per provider (OCR vs vision LLM vs native text); table/heading preservation |
-| Chunk | Do edits leave chunks alone? | % chunk hashes shared across versions (CDC vs fixed-size — ticket 21), embedded-per-edit, chunk size distribution |
+| Chunk | Do edits leave chunks alone? | % chunk hashes shared across versions (CDC vs fixed-size), embedded-per-edit, chunk size distribution |
 | Retrieve | Is the answer-bearing passage returned? | hit@k, recall@k, MRR, nDCG; per mode (semantic/keyword/hybrid), per index/metric, per embedder |
 | Generate | Is the answer right and supported? | answer-fact match, faithfulness (claims supported by cited chunks), answer relevance, citation precision/recall |
 | Abstain | Does it say "not in the documents" when it should — and only then? | abstention precision/recall on unanswerable + near-miss questions |
@@ -54,7 +54,7 @@ questions over two real Fannie Mae chapters) — it is the seed of the golden-se
   the HTTP API so it exercises auth, retrieval, LLM exactly as users do; optionally in-process for
   retrieval-only runs), metric plug-ins, report writer.
 - **Config sweeps** are the payoff: matrix over retrieval mode x fusion x top_k x chunk size x
-  embedder x vector index/metric (tickets 23/24 create exactly these knobs). Output: a table of
+  embedder x vector index/metric (the retrieval and vector-store settings create exactly these knobs). Output: a table of
   quality vs latency vs cost, so "which hybrid weights?" becomes a measured answer.
 - **Storage**: Postgres tables (`eval_runs`, `eval_cases`, `eval_results`) so the dashboard can show
   runs, diff two runs per question, and highlight regressions; mirror to **Langfuse** datasets /
@@ -79,7 +79,7 @@ questions over two real Fannie Mae chapters) — it is the seed of the golden-se
 0. Promote the ad-hoc script into a runner + JSONL schema; deterministic retrieval + fact metrics.
 1. Abstention and versioned-document cases; per-kind breakdown; confidence intervals.
 2. LLM-judge faithfulness/relevance with a calibrated human-labelled slice.
-3. Sweeps over tickets 23/24 knobs; result storage; dashboard page; Langfuse datasets.
+3. Sweeps over the retrieval and vector-store knobs; result storage; dashboard page; Langfuse datasets.
 4. CI gating and production-feedback loop.
 
 ## 7. Questions for the owner

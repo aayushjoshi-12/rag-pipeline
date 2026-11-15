@@ -3,21 +3,23 @@
 | File | What it is | Edit by hand? |
 |---|---|---|
 | [architecture.md](architecture.md) | System diagram, deployment matrix, design boundaries | yes |
-| [api.md](api.md) | Using the HTTP API: auth, API keys, search, chat, streaming (SSE), cache headers, `/v1`, examples | yes |
-| [configuration.md](configuration.md) | Every setting, defaults, scope (deployment vs per-request), tuning notes | yes |
+| [api.md](api.md) | Using the HTTP API: route overview, auth, API keys, search, chat, streaming (SSE), cache headers, `/v1`, examples | yes |
+| [configuration.md](configuration.md) | Layering, providers at a glance, every setting, defaults, scope (deployment vs per-request), tuning notes | yes |
 | [performance.md](performance.md) | Query-cache benchmark: method, numbers, caveats, how to quote them | yes (numbers come from the JSON below) |
-| [deployment.md](deployment.md) | Source vs published images, tags, upgrading, Kubernetes image overrides, release checklist | yes |
+| [status.md](status.md) | What was verified on real services and what was not (the long version of the README table) | yes |
+| [deployment.md](deployment.md) | Source vs published images, tags, upgrading, Kubernetes overview and image overrides, release checklist | yes |
 | [../CHANGELOG.md](../CHANGELOG.md) | Release notes (Keep a Changelog) | yes |
 | [kubernetes-local.md](kubernetes-local.md) | Running the manifests on kind | yes |
 | [adr/](adr/) | Decisions and rejected alternatives: stack, parsing, chunking, cache, `/v1` contract, SSE streaming, API keys, runtime settings (0001-0008) | append-only |
-| [design/incremental-document-update.md](design/incremental-document-update.md) | Design record behind ADR-0003 (content-defined chunking); shipped in ticket 15 | no (historical) |
-| [design/evals-brainstorm.md](design/evals-brainstorm.md) | Ideas only for an evals framework (ticket 27, open); nothing is built | yes (when ticket 27 starts) |
+| [design/incremental-document-update.md](design/incremental-document-update.md) | Design record behind ADR-0003 (content-defined chunking); shipped | no (historical) |
+| [design/evals-brainstorm.md](design/evals-brainstorm.md) | Ideas only for an evals framework; nothing is built | yes (when that work starts) |
+| [images/](images/) | Screenshots used by the README and the social preview image | no (captured from a running dashboard) |
 
 ## Project files at the repository root
 
 | File | What it is |
 |---|---|
-| [../README.md](../README.md) | Project overview and quickstart |
+| [../README.md](../README.md) | Project overview, quickstart, screenshots, status |
 | [../AGENTS.md](../AGENTS.md) | Contributor and coding-agent guide: architecture map, conventions, config layering, test rules (`CLAUDE.md` imports it) |
 | [../CONTRIBUTING.md](../CONTRIBUTING.md) | Dev setup, branch and commit conventions, adding a route with tests, PR checklist |
 | [../SECURITY.md](../SECURITY.md) | How to report a vulnerability privately, scope, supported versions |

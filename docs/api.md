@@ -6,7 +6,7 @@ a change would break existing clients (see [Compatibility](#compatibility-and-th
 
 Sections: [Versioning](#versioning) - [Authentication](#authentication) - [Errors and request ids](#errors-and-request-ids) -
 [Pagination](#pagination) - [Capabilities](#get-v1capabilities) - [CORS](#cors-browser-clients) -
-[End-to-end examples](#end-to-end-examples) - [Headless deployment](#headless-deployment-api-only) - then the per-endpoint
+[Route overview](#route-overview) - [End-to-end examples](#end-to-end-examples) - [Headless deployment](#headless-deployment-api-only) - then the per-endpoint
 reference (search, API keys, cache).
 
 ## Versioning
@@ -96,6 +96,32 @@ A preflight (`OPTIONS`) is answered before authentication. **Credentials/cookies
 (`Access-Control-Allow-Credentials` is not sent; the API authenticates with headers), so `*` is safe from that angle, but
 prefer an explicit list: a bearer token or API key works from any origin you allow. Never put an API key in a public web page;
 use a backend-for-frontend, or a narrow `search:use`-only key behind your own gateway.
+
+## Route overview
+
+All routes except `/health` and `/auth/login|refresh` need a bearer token (or an API key) with the listed permission.
+**Every route below is served under `/v1`** (the contract in [`docs/openapi.json`](openapi.json)); the unversioned paths still work as deprecated aliases (`Deprecation` header). Errors are `{detail, code, request_id}`.
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/auth/login`, `/auth/refresh` | email + password → access/refresh tokens; refresh |
+| GET | `/auth/me` | who am I + effective permissions |
+| GET | `/traces`, `/traces/{id}`, `/usage` | request/ingest trace log and per-day aggregates (`traces:read`) |
+| GET/POST/PATCH/DELETE | `/users`, `/roles` (`GET /permissions`) | admin: manage users, roles and their permissions (`users:manage`, `roles:manage`) |
+| POST/GET | `/api-keys`, `/api-keys/{id}/revoke` | admin (`apikeys:manage`): create (secret shown once), list, revoke API keys for machine clients, sent as `X-API-Key` or `Bearer` ([docs/api.md](api.md#authentication-for-services-api-keys)) |
+| POST | `/documents` | multipart upload → `{document, job}` (413 over the size limit, 415 for bad types) |
+| GET | `/documents`, `/documents/{id}`, `/documents/{id}/chunks` | list / detail with jobs / indexed chunks |
+| PUT | `/documents/{id}` | upload a new version; only changed chunks are re-embedded |
+| DELETE | `/documents/{id}` | removes the row, chunks, vectors and the stored file |
+| GET | `/jobs/{id}` | `pending → running → done \| failed` (+ error) |
+| POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
+| POST | `/chat/stream` | same body; Server-Sent Events `sources`, `token`*, `done` / `error` ([docs/api.md](api.md)) |
+| GET | `/capabilities` | server version, enabled retrieval modes, limits and features (any valid credential, no secrets) |
+| GET/PATCH | `/settings`, `/settings/audit`, `/settings/reindex`, `/settings/test/{service}` | admin Settings window: runtime defaults, write-only secrets, audit log (`settings:read` to view, `settings:manage` to change; [ADR-0008](adr/0008-runtime-settings.md)) |
+| POST | `/documents/from-url` | ingest from an http(s) or `s3://` link (`documents:write`; [configuration](configuration.md#file-storage-and-url-ingest)) |
+| GET/POST | `/cache/stats`, `/cache/purge` | query-cache counters and Redis keyspace (`traces:read`); purge all layers (`cache:manage`) |
+| POST | `/search` | `{query, top_k?, mode?, fusion?, neighbors?, document_ids?, include_text?}` → ranked `results[]` (no LLM; `search:use`; see [docs/api.md](api.md)) |
+| GET | `/health` | db / redis / the active vector store (critical); `vector_settings` (stored index matches the configuration) and ollama (informational) |
 
 ## End-to-end examples
 
@@ -460,7 +486,6 @@ Additive, with one nullability change:
 - `sources` stays one flat list in **prompt order** (citation `[n]` = position `n`): hits are in best-first
   order relative to each other, each context chunk sits next to its hit in reading order.
 
-<!-- ===== Ticket 35: Authentication for services (API keys) ===== -->
 
 ## Authentication for services (API keys)
 
@@ -572,7 +597,6 @@ for hit in r.json()["results"]:
 
 Store the key in your secret manager (a Kubernetes `Secret`, not in the image or in git) and rotate by creating a
 second key, deploying it, then revoking the first.
-<!-- ===== end Ticket 35 ===== -->
 
 ## Query cache headers and endpoints
 
@@ -581,7 +605,6 @@ same verdict in `cache`. Send `"cache": false` (or `Cache-Control: no-cache`) to
 and `POST /cache/purge` (permission `cache:manage`). See [`configuration.md`](./configuration.md#query-cache).
 
 
-<!-- ===== Ticket 38: Chat streaming (SSE) ===== -->
 
 ## Streaming chat: `POST /chat/stream`
 

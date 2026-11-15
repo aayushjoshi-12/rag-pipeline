@@ -1,10 +1,10 @@
 # Incremental document update (design)
 
-Status: **Implemented (historical design record)** — written before tickets 5 & 6 to pin the chunking strategy; the update path shipped in ticket 15 (`PUT /documents/{id}`, `backend/app/services/incremental.py`). Current behaviour: [ADR-0003](../adr/0003-chunking.md) and [`configuration.md`](../configuration.md).
+Status: **Implemented (historical design record)** — written before the chunker and ingest pipeline to pin the chunking strategy; the update path shipped with the document update endpoint (`PUT /documents/{id}`, `backend/app/services/incremental.py`). Current behaviour: [ADR-0003](../adr/0003-chunking.md) and [`configuration.md`](../configuration.md).
 
 This doc captures the brainstorming that led to the CDC decision in
-[`ADR-0003`](../adr/0003-chunking.md). Read this when building the chunker (ticket 5) and the
-ingest pipeline (ticket 6); the update path itself is a follow-up ticket after 6.
+[`ADR-0003`](../adr/0003-chunking.md). Read this when building the chunker and the
+ingest pipeline; the update path itself is a follow-up ticket after 6.
 
 ## Problem
 
@@ -51,7 +51,7 @@ On a re-ingest of an existing document (`job_id` for the doc):
    metadata).
 4. `kept = old ∩ new`, `added = new − old`, `removed = old − new` (align by content hash).
 5. Embed `added` only; `ChromaStore` upserts added + drops removed (we already have
-   `did_similarity_search`-safe `delete_doc` / ID-based upsert primitives from ticket 3).
+   `did_similarity_search`-safe `delete_doc` / ID-based upsert primitives).
 6. Bump the document's revision; record `added`/`removed`/`kept` counts on the Job.
 
 ## Reliability guards
@@ -61,7 +61,7 @@ On a re-ingest of an existing document (`job_id` for the doc):
   to full re-chunk + diff (or full rebuild), never trust stale hashes.
 - **No churn-based fallback by default.** The original design fell back to delete-doc + re-embed
   when `len(added) + len(removed) > ~half the doc's chunks`. A real revision of the Fannie Mae
-  Selling Guide (ticket 21/26) showed why that is wrong: with 365 old chunks, 169 reusable, 181 new
+  Selling Guide showed why that is wrong: with 365 old chunks, 169 reusable, 181 new
   and 196 removed, the rule rebuilt all 350 chunks while incremental embeds only the 181 added. An
   incremental update never embeds more than a rebuild, so it is the default for any amount of churn.
   `INCREMENTAL_MAX_CHURN` (unset by default) re-enables a rebuild guard if a deployment wants one.
@@ -72,14 +72,14 @@ On a re-ingest of an existing document (`job_id` for the doc):
 
 ## Where it lives
 
-- **Chunker** (ticket 5): `app/services/chunking.py` — `chunk_text(text, *, chunk_size,
+- **Chunker**: `app/services/chunking.py` — `chunk_text(text, *, chunk_size,
   chunk_overlap) -> list[ChunkSpec]`, `ChunkSpec` gains `content_hash`, chunker fingerprint
   helper.
-- **Ingest** (ticket 6): `app/tasks/ingest.py::process_document` orchestrates parse → chunk →
+- **Ingest**: `app/tasks/ingest.py::process_document` orchestrates parse → chunk →
   diff → embed-added → upsert/drop → job/status update.
-- **KB/vector store** (done, ticket 3): `ChromaStore.add_chunks` / `delete_doc` / metadata with
+- **KB/vector store** (done): `ChromaStore.add_chunks` / `delete_doc` / metadata with
   `doc_id` + `index` — plus `content_hash` metadata added by the chunker.
-- **DB** (done, ticket 2): `Chunk.metadata` JSON holds `content_hash` + `chunker_fingerprint`;
+- **DB** (done): `Chunk.metadata` JSON holds `content_hash` + `chunker_fingerprint`;
   the reserved `Chunk.vector(1024)` column stays unused (pgvector co-retrieval is a later,
   separate decision).
 

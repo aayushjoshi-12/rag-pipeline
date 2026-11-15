@@ -1,7 +1,7 @@
 # 0008 - Runtime settings: an admin UI layer
 
 - Status: **Accepted** (owner decisions 2026-11-15)
-- Date: 2026-11-15 (ticket 43)
+- Date: 2026-11-15
 
 ## Context
 

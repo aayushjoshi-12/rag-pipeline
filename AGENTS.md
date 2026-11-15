@@ -164,7 +164,7 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 ## Config loading (dev vs prod)
 
 Config is four-layered (highest wins): **env vars (incl. `.env`) → admin UI (database, `app_settings`) →
-`config/config.<env>.json` → defaults** (ticket 43, ADR-0008). The UI layer is a pydantic-settings source
+`config/config.<env>.json` → defaults** (ADR-0008). The UI layer is a pydantic-settings source
 (`DbOverridesSource`) fed by an in-memory snapshot that `app/services/runtime_settings.py` loads from the DB
 (API: lazily every `SETTINGS_REFRESH_SECONDS` and after its own writes; Celery: at task start), so any
 `Settings()` already includes it. Never capture `Settings()` at import time for a UI-editable key; build it per
@@ -218,7 +218,7 @@ Coverage target: 70% on new code. Aim for it.
   run `make chroma-test-up` first. Tests read `CHROMA_TEST_HOST`/`CHROMA_TEST_PORT` (default `localhost:8002`);
   `tests/conftest.py` refuses any other Chroma address and, if the server is unreachable, **fails** loudly (skips
   only with `RAG_TEST_ALLOW_NO_CHROMA=1`). Reason: Chroma keeps every written index in memory, and tests that
-  churned the dev server grew it ~350 MiB per run (ticket 50).
+  churned the dev server grew it ~350 MiB per run.
 - **Don't make real API calls in tests** (no live OpenAI/Anthropic/Chroma/Redis). Use
   `pytest-httpx`, `MagicMock`, or in-memory fakes.
 

@@ -1,7 +1,7 @@
 # 0004 — Query cache: three fail-open Redis layers
 
 - Status: **Accepted**
-- Date: 2026-11-15 (ticket 37)
+- Date: 2026-11-15
 
 ## Context
 
