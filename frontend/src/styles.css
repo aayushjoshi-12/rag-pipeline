@@ -1648,12 +1648,6 @@ input.switch:checked::after {
   opacity: 0;
   cursor: pointer;
 }
-.chip.is-on {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent-ink);
-  font-weight: 550;
-}
 .chip:has(input:focus-visible) {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
@@ -1746,15 +1740,8 @@ input.switch:checked::after {
   gap: var(--s-4);
   margin-top: var(--s-3);
 }
-.chart-grid.cols-3 {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr));
-}
 .chart-grid > .span-all {
   grid-column: 1 / -1;
-}
-.usage-section {
-  display: flex;
-  flex-direction: column;
 }
 .viz figcaption,
 .chart-head {

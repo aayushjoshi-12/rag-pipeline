@@ -17,7 +17,7 @@ const SOURCE_LABEL: Record<SettingItem['source'], string> = {
   default: 'default',
 }
 
-export function SourceBadge({ item }: { item: SettingItem }) {
+function SourceBadge({ item }: { item: SettingItem }) {
   return (
     <span className={`badge src src-${item.source}`} data-testid={`source-${item.key}`}>
       {SOURCE_LABEL[item.source]}

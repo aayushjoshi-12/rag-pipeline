@@ -2597,7 +2597,7 @@ dependencies = [
     { name = "cryptography" },
     { name = "docling-slim", extra = ["format-docx", "format-pdf-pypdfium2"] },
     { name = "fastapi" },
-    { name = "greenlet" },
+    { name = "httpx" },
     { name = "langfuse" },
     { name = "openai" },
     { name = "pgvector" },
@@ -2619,7 +2619,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
@@ -2639,7 +2638,7 @@ requires-dist = [
     { name = "cryptography", specifier = ">=50.0.2" },
     { name = "docling-slim", extras = ["format-docx", "format-pdf-pypdfium2"], specifier = ">=2.3" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "greenlet", specifier = ">=3.0" },
+    { name = "httpx", specifier = ">=0.27" },
     { name = "langfuse", specifier = ">=4" },
     { name = "openai", specifier = ">=1.58" },
     { name = "pgvector", specifier = ">=0.5.0" },
@@ -2661,7 +2660,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.27" },
     { name = "mypy", specifier = ">=1.13" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pytest-asyncio", specifier = ">=0.24" },

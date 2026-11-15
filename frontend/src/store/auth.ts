@@ -70,4 +70,4 @@ export function useCan(permission: string): boolean {
   return useAuth((s) => s.me?.permissions.includes(permission) ?? false)
 }
 
-export const hasStoredSession = (): boolean => getTokens() !== null
+const hasStoredSession = (): boolean => getTokens() !== null

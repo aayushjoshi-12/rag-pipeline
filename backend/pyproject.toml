@@ -12,7 +12,6 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "python-multipart>=0.0.17",
     "sqlalchemy[asyncio]>=2.0",
-    "greenlet>=3.0",
     "asyncpg>=0.31",
     "psycopg[binary]>=3.3",
     "alembic>=1.18",
@@ -34,6 +33,9 @@ dependencies = [
     "pyjwt>=2.8",
     "boto3>=1.44.3",
     "cryptography>=50.0.2",
+    # imported directly by the URL fetcher, credits, health probe and Ollama embedder (also a transitive dep of
+    # openai/anthropic/chromadb-client, but a runtime import must not depend on that).
+    "httpx>=0.27",
 ]
 
 [dependency-groups]
@@ -43,7 +45,6 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
-    "httpx>=0.27",
     "respx>=0.22",
 ]
 

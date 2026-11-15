@@ -48,13 +48,6 @@ class IngestError(Exception):
     """A user-visible ingest failure (recorded on the job)."""
 
 
-def resolve_source_path(doc: Document, settings: Settings) -> Path:
-    if not doc.source_path:
-        raise IngestError("document has no source_path")
-    path = Path(doc.source_path)
-    return path if path.is_absolute() else settings.data_dir / path
-
-
 def _filetype(doc: Document) -> str:
     suffix = Path(doc.filename).suffix.lstrip(".").lower()
     if suffix:

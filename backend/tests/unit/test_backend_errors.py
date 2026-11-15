@@ -12,7 +12,7 @@ import pytest
 import respx
 from app.services.backends import AnthropicBackend, OCRBackend, OpenRouterBackend
 from app.services.parse_errors import BackendCallError, BackendRequestError
-from app.services.pdf_pages import PdfPageRenderer
+from app.services.pdf_pages import page_count, render_page
 from httpx import Response
 from PIL import Image
 
@@ -126,15 +126,16 @@ def test_pdf_renderer_renders_one_image_per_page(tmp_path: Path) -> None:
     doc.save(str(pdf))
     doc.close()
 
-    low = PdfPageRenderer(dpi=72).load(pdf)
-    high = PdfPageRenderer(dpi=144).load(pdf)
-    assert len(low) == 2
+    assert page_count(pdf) == 2
+    low = [render_page(pdf, i, 72) for i in range(2)]
+    high = [render_page(pdf, i, 144) for i in range(2)]
+    assert len(low) == len(high) == 2
     assert high[0].width == low[0].width * 2
 
 
 def test_pdf_renderer_rejects_bad_dpi() -> None:
     with pytest.raises(ValueError, match="dpi"):
-        PdfPageRenderer(dpi=0)
+        render_page(Path("unused.pdf"), 0, 0)
 
 
 def test_ocr_missing_tesseract_is_a_permanent_error(monkeypatch: pytest.MonkeyPatch) -> None:

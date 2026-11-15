@@ -222,7 +222,7 @@ class QueryCache:
         return self._sync
 
     def bump_sync(self, attempts: int = 3) -> bool:
-        """Invalidate every retrieval entry (blocking; call via ``abump`` from async code). Never raises.
+        """Invalidate every retrieval entry (blocking; call via ``abump_index_version`` from async code). Never raises.
 
         A random token (not an incrementing counter) is stored, so an evicted/reset key can never make an old
         entry reachable again. If Redis cannot be reached this process remembers to purge the retrieval layer
@@ -248,9 +248,6 @@ class QueryCache:
             last,
         )
         return False
-
-    async def abump(self) -> bool:
-        return await asyncio.to_thread(self.bump_sync)
 
     # ── generic get-or-compute with single flight ────────────────────────────────────────────
     async def cached(

@@ -90,7 +90,3 @@ def normalise_text(text: str) -> str:
         return text
     return unicodedata.normalize("NFC", text.translate(_TABLE))
 
-
-def has_ligatures(text: str) -> bool:
-    """True when ``text`` still contains a Latin ligature character (used by the evaluation scripts)."""
-    return any(c in text for c in _LIGATURES)

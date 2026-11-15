@@ -66,35 +66,6 @@ def test_ollama_embedder_embed_query_returns_single_vector() -> None:
     assert embedder.embed_query("q") == [0.5, 0.6]
 
 
-def test_embed_texts_returns_empty_for_empty_input() -> None:
-    assert emb.embed_texts([]) == []
-
-
-def test_embed_texts_uses_provided_embedder() -> None:
-    class FakeEmbedder:
-        def embed_documents(self, texts: list[str]) -> list[list[float]]:
-            return [[1.0, 0.0] for _ in texts]
-
-        def embed_query(self, text: str) -> list[float]:
-            return [1.0, 0.0]
-
-    out = emb.embed_texts(["a", "b"], embedder=FakeEmbedder())  # type: ignore[arg-type]
-    assert out == [[1.0, 0.0], [1.0, 0.0]]
-
-
-def test_embed_texts_default_embedder_calls_embed_documents(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeEmbedder:
-        def embed_documents(self, texts: list[str]) -> list[list[float]]:
-            return [[float(len(texts))] for _ in texts]
-
-        def embed_query(self, text: str) -> list[float]:
-            return [0.0]
-
-    monkeypatch.setattr(emb, "get_embedder", lambda: FakeEmbedder())  # type: ignore[assignment]
-    out = emb.embed_texts(["x", "y", "z"])
-    assert out == [[3.0], [3.0], [3.0]]
-
-
 def test_config_rejects_unknown_embedding_provider() -> None:
     from app.config import Settings
     from pydantic import ValidationError

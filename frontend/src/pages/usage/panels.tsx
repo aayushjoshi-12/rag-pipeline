@@ -53,7 +53,7 @@ function Waiting({ error }: { error: string | null }) {
 }
 
 /** Credits left on the OpenRouter key as a budget bar, with the projected days at the 7-day burn. */
-export function CreditsCard({ credits, days }: { credits: Credits | null; days: DayUsage[] }) {
+function CreditsCard({ credits, days }: { credits: Credits | null; days: DayUsage[] }) {
   const burn = burnPerDay(days)
   let body
   if (credits === null) {

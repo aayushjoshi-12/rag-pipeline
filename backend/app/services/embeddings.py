@@ -179,13 +179,3 @@ def get_embedder(
     # Unreachable — _VALID_PROVIDERS guard above.
     raise ValueError(f"Unhandled embedding provider '{provider}'.")  # pragma: no cover
 
-
-def embed_texts(
-    texts: list[str],
-    embedder: Embedder | None = None,
-) -> list[list[float]]:
-    """Embed a list of texts, returning one vector per input text."""
-    if not texts:
-        return []
-    _embedder = embedder or get_embedder()
-    return _embedder.embed_documents(texts)

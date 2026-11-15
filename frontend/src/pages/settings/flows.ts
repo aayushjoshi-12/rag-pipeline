@@ -133,9 +133,6 @@ export const FLOWS: Flow[] = [
   },
 ]
 
-export const FLOW_KEYS = (value: (key: string) => SettingValue): Set<string> =>
-  new Set(FLOWS.flatMap((f) => f.keys(value)))
-
 /** Every key a flow can ever show, regardless of provider (so the generic list never repeats them). */
 export const ALL_FLOW_KEYS: Set<string> = new Set([
   'llm_provider',

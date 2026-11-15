@@ -25,12 +25,11 @@ def _ollama_up() -> bool:
 
 @pytest.mark.skipif(not _ollama_up(), reason="Ollama is not reachable on localhost")
 def test_ollama_mxbai_embed_returns_1024_dim() -> None:
-    from app.services.embeddings import embed_texts, get_embedder
+    from app.services.embeddings import get_embedder
 
     embedder = get_embedder()
-    vectors = embed_texts(
-        ["Retrieval-Augmented Generation combines retrieval with generation."],
-        embedder=embedder,
+    vectors = embedder.embed_documents(
+        ["Retrieval-Augmented Generation combines retrieval with generation."]
     )
     assert len(vectors) == 1
     assert len(vectors[0]) == 1024

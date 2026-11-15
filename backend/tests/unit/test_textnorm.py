@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import pytest
-from app.services.textnorm import has_ligatures, normalise_text
+from app.services.textnorm import normalise_text
 
 
 @pytest.mark.parametrize(
@@ -19,7 +19,6 @@ from app.services.textnorm import has_ligatures, normalise_text
 )
 def test_ligatures_are_expanded(raw: str, expected: str) -> None:
     assert normalise_text(raw) == expected
-    assert not has_ligatures(normalise_text(raw))
 
 
 @pytest.mark.parametrize(

@@ -16,7 +16,6 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
-import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -246,6 +245,3 @@ def get_storage(settings: Settings, backend: str | None = None) -> Storage:
         return S3Storage(settings)
     raise StorageError(f"unknown storage backend '{backend}'")
 
-
-def sweep_age_cutoff(min_age_hours: float, now: float | None = None) -> float:
-    return (now if now is not None else time.time()) - min_age_hours * 3600

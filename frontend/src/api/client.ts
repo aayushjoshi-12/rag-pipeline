@@ -35,7 +35,7 @@ import type {
 import { clearTokens, getTokens, notifySessionLost, setTokens } from '../auth/session'
 import { StreamUnavailableError, readChatStream } from './stream'
 
-export const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? '/api'
+const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
 export class ApiError extends Error {
   readonly status: number

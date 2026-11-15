@@ -315,7 +315,7 @@ async def test_single_flight_one_compute_for_concurrent_identical_misses(qc: Que
 async def test_index_bump_changes_version_and_hides_old_entries(qc: QueryCache) -> None:
     v1 = await qc.index_version()
     assert v1 and await qc.index_version() == v1
-    assert await qc.abump()
+    assert await asyncio.to_thread(qc.bump_sync)
     v2 = await qc.index_version()
     assert v2 and v2 != v1
     r = redis_lib.Redis.from_url(URL)

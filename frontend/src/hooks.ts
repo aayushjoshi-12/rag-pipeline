@@ -5,7 +5,7 @@ import type { Job } from './types'
 
 const TERMINAL = new Set(['done', 'failed'])
 
-export const isTerminal = (status: string): boolean => TERMINAL.has(status)
+const isTerminal = (status: string): boolean => TERMINAL.has(status)
 
 /** Poll GET /jobs/{id} until it reaches done/failed, then call onSettled once. */
 export function useJobPolling(jobId: string | null, onSettled?: (job: Job) => void): void {
