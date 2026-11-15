@@ -44,6 +44,7 @@ x-backend: &backend
 services:
   db:
     image: pgvector/pgvector:pg16
+    restart: unless-stopped  # data services come back after a Docker/host restart
     container_name: rag-pipeline-db
     environment:
       POSTGRES_USER: rag
@@ -61,6 +62,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped  # data services come back after a Docker/host restart
     container_name: rag-pipeline-redis
     ports:
       - "6379:6379"
@@ -72,6 +74,7 @@ services:
 
   chroma:
     image: chromadb/chroma:latest
+    restart: unless-stopped  # data services come back after a Docker/host restart
     container_name: rag-pipeline-chroma
     ports:
       - "8001:8000"
