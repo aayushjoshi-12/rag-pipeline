@@ -16,7 +16,7 @@ Two images are published to the GitHub Container Registry by `.github/workflows/
 | Image | Contents |
 |---|---|
 | `ghcr.io/aayushjoshi-12/rag-pipeline-backend` | API, Celery worker, Celery beat and the Alembic migration: one image, the command differs (`uvicorn`, `celery ... worker`, `celery ... beat`, `alembic upgrade head`). Runs as UID 10001. |
-| `ghcr.io/aayushjoshi-12/rag-pipeline-frontend` | The dashboard: static build served by nginx, `/api/` proxied to `API_UPSTREAM`. nginx's master process runs as root (the official `nginx:alpine` base); only the workers drop privileges. |
+| `ghcr.io/aayushjoshi-12/rag-pipeline-frontend` | The dashboard: static build served by nginx, `/api/` proxied to `API_UPSTREAM`. Built on `nginxinc/nginx-unprivileged`: nginx runs as a non-root user and listens on container port 8080 (the Kubernetes Service still exposes port 80). |
 
 Platforms: `linux/amd64` and `linux/arm64` (one multi-arch tag; Docker pulls the right one).
 

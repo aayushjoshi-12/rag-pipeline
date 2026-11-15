@@ -6,9 +6,15 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine
+# Unprivileged nginx (non-root master and workers, listens on 8080). Tag follows the stable 1.30 line; bump it when Trivy
+# reports fixable OS CVEs in the base.
+FROM nginxinc/nginx-unprivileged:1.30-alpine
+# Pull in the Alpine security fixes published since the base image was built (the release gate fails on fixable CRITICALs).
+USER root
+RUN apk upgrade --no-cache
+USER nginx
 # API_UPSTREAM is substituted into the template at container start (nginx image feature).
 ENV API_UPSTREAM=http://rag-pipeline-api:8000
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+EXPOSE 8080

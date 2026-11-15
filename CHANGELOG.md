@@ -15,6 +15,18 @@ breaking changes (they will be listed under "Changed" or "Removed").
 - `docs/deployment.md`: source vs published images, tags, upgrading, Kubernetes image overrides, release checklist.
 
 ### Changed
+- **PDF library: pypdfium2 replaces PyMuPDF.** PyMuPDF is AGPL-3.0, which does not fit an MIT project and its images. Page count,
+  native text and page renders (for OCR and vision) now use pypdfium2 (Apache-2.0 / BSD-3). Retrieval results and incremental-update chunk
+  reuse on the real test documents are unchanged; the backend image is about 100 MB smaller. A unit test fails if PyMuPDF returns.
+  See ADR-0002.
+- **Dependency security bumps** (fixes for the Trivy release gate): pillow 12.3.0 to 13.0.0, certifi 2026.7.22 to 2026.10.23,
+  urllib3 2.7.0 to 2.8.0, docling-slim 2.126.0 to 2.132.0.
+- **Frontend image** is built on `nginxinc/nginx-unprivileged:1.30-alpine` (nginx runs as a non-root user) and now listens on
+  container port 8080 instead of 80; `docker-compose.image.yml` maps the host port to 8080 and the Kubernetes Service still
+  exposes port 80 (target port 8080). Alpine security updates are applied at build time. If you ran the image with
+  `-p X:80`, use `-p X:8080`.
+- **Backend image**: the `uv` build image is pinned to an exact version instead of `latest`, and Debian security updates are
+  applied at build time.
 - `ci.yml` is callable from other workflows and its third-party actions are pinned to commit SHAs.
 - `.dockerignore` files also exclude `.env*`, `.git`, `data`, `tmp`, `__pycache__`, `.DS_Store` from build contexts.
 
