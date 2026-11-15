@@ -8,7 +8,7 @@ RUN npm run build
 
 # Unprivileged nginx (non-root master and workers, listens on 8080). Tag follows the stable 1.30 line; bump it when Trivy
 # reports fixable OS CVEs in the base.
-FROM nginxinc/nginx-unprivileged:1.30-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 # Pull in the Alpine security fixes published since the base image was built (the release gate fails on fixable CRITICALs).
 USER root
 RUN apk upgrade --no-cache
