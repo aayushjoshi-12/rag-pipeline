@@ -85,7 +85,8 @@ found; `semantic` (embeddings only) is the default. Every key is listed in [`doc
 
 ## API
 
-All routes except `/health` and `/auth/login|refresh` need a bearer token with the listed permission.
+All routes except `/health` and `/auth/login|refresh` need a bearer token (or an API key) with the listed permission.
+**Every route below is served under `/v1`** (the contract in [`docs/openapi.json`](docs/openapi.json)); the unversioned paths still work as deprecated aliases (`Deprecation` header). Errors are `{detail, code, request_id}`.
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -100,6 +101,9 @@ All routes except `/health` and `/auth/login|refresh` need a bearer token with t
 | DELETE | `/documents/{id}` | removes the row, chunks, vectors and the stored file |
 | GET | `/jobs/{id}` | `pending → running → done \| failed` (+ error) |
 | POST | `/chat` | `{question, document_ids?, top_k?}` → `{answer, sources[]}` |
+| POST | `/chat/stream` | same body; Server-Sent Events `sources`, `token`*, `done` / `error` ([docs/api.md](docs/api.md)) |
+| GET | `/capabilities` | server version, enabled retrieval modes, limits and features (any valid credential, no secrets) |
+| GET/POST | `/cache/stats`, `/cache/purge` | query-cache counters and Redis keyspace (`traces:read`); purge all layers (`cache:manage`) |
 | POST | `/search` | `{query, top_k?, mode?, fusion?, neighbors?, document_ids?, include_text?}` → ranked `results[]` (no LLM; `search:use`; see [docs/api.md](docs/api.md)) |
 | GET | `/health` | db / redis / the active vector store (critical); `vector_settings` (stored index matches the configuration) and ollama (informational) |
 
@@ -157,11 +161,11 @@ Honest accounting of what has been exercised against real services versus only u
 | Load / scale behaviour (many workers) | 2 workers on one laptop node only; 3 workers starved an 8 GiB Docker VM | not measured beyond that |
 
 Smoke-test scripts and reports are kept locally under `tmp/` (gitignored); the automated suite
-(`make check`) runs 250+ backend and 24 frontend tests with fakes for external services.
+(`make check`) runs 1,290+ backend and 240+ frontend tests with fakes for external services.
 
 ## Repository map
 
 `backend/app` — `routers/` (HTTP), `services/` (parse, chunk, embed, retrieve, QA, ingest, cleanup),
 `tasks/` (Celery), `db/` (SQLAlchemy + Alembic), `schema/` (pydantic) · `frontend/src` — API client,
-zustand store, pages · `k8s/` — manifests · `docs/` — architecture and ADRs · `context/` — founding
+zustand store, pages · `k8s/` — manifests · `docs/` — architecture, ADRs, API and config reference, benchmark ([index](docs/README.md)) · `context/` — founding
 scope. Operating rules for contributors and agents are in [CLAUDE.md](CLAUDE.md).
