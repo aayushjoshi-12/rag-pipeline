@@ -18,7 +18,7 @@ The parser is original code in this repo (`backend/app/services/`), behind one s
 
 | Piece | Module | What it does |
 |---|---|---|
-| PDF page renderer | `services/pdf_pages.py` | PDF → one RGB image per page (PyMuPDF at configurable DPI, render lock for thread-safety) |
+| PDF access | `services/pdf_pages.py` | Page count, native text layer per page, and one RGB image per page at the configured DPI (pypdfium2; one process-wide lock, handles closed explicitly) |
 | Backend interface | `services/backends/base.py` | `BaseBackend`: `name`, `extract_text(image) -> str` |
 | OCR backend | `services/backends/ocr_backend.py` | Tesseract on a page image (scanned PDFs); needs `tesseract-ocr` + `pytesseract` |
 | OpenAI-compatible vision backend | `services/backends/openai_backend.py` | Chat-completions with an image part (OpenAI SDK) |
@@ -84,7 +84,7 @@ in prod — same three-layer rule as the rest of the app).
 | Provider base URL | `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Where the OpenAI-compatible client points for OpenRouter |
 | Extraction system prompt | `PARSER_SYSTEM_PROMPT` | verbatim-text prompt | Injected as the transcription/system prompt — **change it via config, never by editing backend code** |
 | Backend timeout | `PARSER_TIMEOUT_SECONDS` | `60.0` | Per-call timeout for OCR/vision backends (feeds tenacity retry) |
-| PDF render DPI | `PDF_DPI` | `300` | PyMuPDF page render resolution feeding OCR/vision |
+| PDF render DPI | `PDF_DPI` | `300` | pypdfium2 page render resolution feeding OCR/vision |
 | OCR language | `OCR_LANG` | `eng` | Tesseract `lang` for the `ocr` provider |
 | Tesseract binary | `TESSERACT_CMD` | `""` | Override tesseract path (else system default) |
 | PDF text source | `PDF_TEXT_SOURCE` | `auto` | `auto` (text layer per page, OCR/vision for scanned pages) \| `native` \| `image` |
@@ -98,10 +98,35 @@ extraction), gated on cost data.
 
 - The worker's `parse` step composes: **PDF** → image pages → OCR or vision LLM text; **DOCX**
   → docling Word backend → markdown; both → a common `ParseResult` (see `app/services/parser.py` seam).
-- New deps: `docling-slim[format-docx,format-pdf-pypdfium2]`, `pytesseract`, `Pillow`(+), keep `pymupdf`; `python-docx` drops out.
+- New deps: `docling-slim[format-docx,format-pdf-pypdfium2]`, `pytesseract`, `Pillow`(+), `python-docx` drops out. (`pymupdf` was kept here originally and replaced by `pypdfium2` later, see the addendum.)
 
 ## Future option (not decided)
 
-Direct native-text PDF extraction (docling or PyMuPDF `get_text`) for born-digital PDFs as the
+Direct native-text PDF extraction (docling or the PDF library's text layer) for born-digital PDFs as the
 *default* PDF path, with the image/OCR/vision path reserved for scanned files. Open as a config
 flag discussion when cost data exists.
+
+## Addendum (2026-11): pypdfium2 replaces PyMuPDF
+
+PyMuPDF (and the MuPDF library it wraps) is licensed AGPL-3.0 or under a paid Artifex commercial licence. This
+repository and its container images are MIT, so bundling it would have made every distributed image AGPL-encumbered
+and put source-offer obligations on anyone who runs a modified copy as a network service. The PDF layer now uses
+**pypdfium2** (the Python binding to Google's PDFium; Apache-2.0 / BSD-3-Clause), which docling already pulled in for its
+PDF format, so no new native stack is added and the image is about 100 MB smaller.
+
+- **Scope.** Only `services/pdf_pages.py` changed; `parser.py` and the backends see the same three functions
+  (`extract_native_texts`, `page_count`, `render_page`). Native text is read per page with `get_text_range()`; pdfium's CRLF
+  line ends are folded to `\n`. Pages render with `scale = dpi / 72` and are converted to a PIL RGB image.
+- **Memory.** One page at a time, as before. The document, page, text page and bitmap are closed explicitly as soon as they
+  are read (a test asserts every handle is closed). PDFium has no process-global image store, so the old
+  `store_shrink` workaround is gone. A synthetic 200-page scan peaks at about 250 MiB (was about 256 MiB for the same file
+  with PyMuPDF); a 200-page text PDF at about 132 MiB (was 165 MiB).
+- **Thread safety.** PDFium is not safe for concurrent use, so a single lock still serialises all calls.
+- **Text differences.** pdfium expands PDF ligatures itself (no "fi"/"fl" code points are produced; the ticket 33
+  normalisation still runs for other sources) and joins some table-cell lines with a space where MuPDF kept a newline.
+  Measured on four real Selling Guide chapters: page text similarity 0.9967 to 0.9991 (mean), identical retrieval
+  results, identical chunk reuse on a version update. Details are kept in the project's local smoke reports.
+- **Errors.** Corrupt, empty and password-protected PDFs still surface as `DocumentLoadError("Failed to load PDF ...")`
+  (the message now carries pdfium's reason, for example "Incorrect password error").
+- **Guard.** `tests/unit/test_pdf_licence_guard.py` fails if `pymupdf`/`fitz` is importable, declared in `pyproject.toml`
+  or resolved in `uv.lock`.

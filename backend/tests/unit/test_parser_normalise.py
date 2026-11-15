@@ -9,6 +9,7 @@ import pytest
 from app.config import Settings
 from app.services import parser as parser_mod
 from app.services.parser import parse
+from tests.pdfmaker import write_pdf
 
 RAW = "Please conﬁrm the oﬀer: the ﬁrst oﬃce “opens”."
 FOLDED = 'Please confirm the offer: the first office "opens".'
@@ -31,12 +32,7 @@ def test_pdf_text_and_page_texts_are_both_normalised(tmp_path: Path, monkeypatch
     pages = [RAW + " " + "x" * 60, "Second page: " + RAW + " " + "y" * 60]
     monkeypatch.setattr(parser_mod, "extract_native_texts", lambda path: pages)
     pdf = tmp_path / "f.pdf"
-    import fitz
-
-    doc = fitz.open()
-    doc.new_page()
-    doc.new_page()
-    doc.save(str(pdf))
+    write_pdf(pdf, [None, None])
     res = parse(pdf, "pdf", settings=Settings(pdf_text_source="native"))
     assert res.provider == "native"
     assert all("ﬁ" not in t and "ﬀ" not in t for t in res.page_texts)

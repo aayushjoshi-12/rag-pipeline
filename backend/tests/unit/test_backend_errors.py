@@ -15,6 +15,7 @@ from app.services.parse_errors import BackendCallError, BackendRequestError
 from app.services.pdf_pages import page_count, render_page
 from httpx import Response
 from PIL import Image
+from tests.pdfmaker import write_pdf
 
 _OR_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -117,14 +118,7 @@ def test_anthropic_backend_maps_http_statuses(status: int, exc: type[Exception])
 
 
 def test_pdf_renderer_renders_one_image_per_page(tmp_path: Path) -> None:
-    import pymupdf
-
-    pdf = tmp_path / "two.pdf"
-    doc = pymupdf.open()
-    doc.new_page()
-    doc.new_page()
-    doc.save(str(pdf))
-    doc.close()
+    pdf = write_pdf(tmp_path / "two.pdf", [None, None])
 
     assert page_count(pdf) == 2
     low = [render_page(pdf, i, 72) for i in range(2)]

@@ -4,24 +4,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pymupdf
+import pypdfium2 as pdfium
 import pytest
 from app.config import Settings
 from app.services import parser, pdf_pages
 from app.services.backends import BaseBackend
-from PIL import Image
+from PIL import Image, ImageDraw
+from tests.pdfmaker import write_pdf
 
 
 def _scan_pdf(path: Path, pages: int) -> Path:
-    src = pymupdf.open()
-    src.new_page().insert_text((50, 60), "scan")
-    png = src.load_page(0).get_pixmap(dpi=40).tobytes("png")
-    doc = pymupdf.open()
-    for _ in range(pages):
-        page = doc.new_page()
-        page.insert_image(page.rect, stream=png)  # image only: no text layer
-    doc.save(str(path))
-    return path
+    img = Image.new("RGB", (200, 120), "white")
+    ImageDraw.Draw(img).rectangle((10, 10, 150, 60), fill="black")
+    return write_pdf(path, [img] * pages)  # image only: no text layer
 
 
 class _Recorder(BaseBackend):
@@ -52,13 +47,45 @@ def test_parser_renders_and_extracts_page_by_page(tmp_path: Path, monkeypatch: p
     assert events == ["render0", "extract", "render1", "extract", "render2", "extract"]
 
 
-def test_render_page_shrinks_the_mupdf_image_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # Without the shrink a 60-page scan held ~600 MB RSS after rendering (flat ~115 MB with it).
-    calls: list[int] = []
-    monkeypatch.setattr(pymupdf.TOOLS, "store_shrink", lambda percent: calls.append(percent))
-    img = pdf_pages.render_page(_scan_pdf(tmp_path / "s.pdf", 2), 1, 72)
-    assert img.size[0] > 0 and calls == [100]
-    assert pdf_pages.page_count(tmp_path / "s.pdf") == 2
+class _Tracker:
+    """Records close() calls of the pdfium objects pdf_pages opens."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.closed: list[str] = []
+        for cls in (pdfium.PdfDocument, pdfium.PdfPage, pdfium.PdfTextPage, pdfium.PdfBitmap):
+            original = cls.close
+
+            def close(obj: object, _orig: object = original, _name: str = cls.__name__) -> None:
+                self.closed.append(_name)
+                _orig(obj)  # type: ignore[operator]  # test shim around the unbound pypdfium2 close()
+
+            monkeypatch.setattr(cls, "close", close)
+
+
+def test_render_page_closes_document_page_and_bitmap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Handles must be released explicitly: relying on the GC is what let the old renderer pile up memory.
+    pdf = _scan_pdf(tmp_path / "s.pdf", 2)
+    tracker = _Tracker(monkeypatch)
+    img = pdf_pages.render_page(pdf, 1, 72)
+    assert img.size[0] > 0 and img.mode == "RGB"
+    assert sorted(tracker.closed) == ["PdfBitmap", "PdfDocument", "PdfPage"]
+    assert pdf_pages.page_count(pdf) == 2
+
+
+def test_native_text_closes_every_page_and_text_page(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pdf = write_pdf(tmp_path / "t.pdf", ["alpha", "beta", None])
+    tracker = _Tracker(monkeypatch)
+    assert pdf_pages.extract_native_texts(pdf) == ["alpha", "beta", ""]
+    assert tracker.closed.count("PdfPage") == 3 and tracker.closed.count("PdfTextPage") == 3
+    assert tracker.closed.count("PdfDocument") == 1
+
+
+def test_render_page_honours_dpi(tmp_path: Path) -> None:
+    pdf = _scan_pdf(tmp_path / "s.pdf", 1)
+    low = pdf_pages.render_page(pdf, 0, 72)
+    high = pdf_pages.render_page(pdf, 0, 144)
+    assert low.size == (595, 842)  # A4 at 72 dpi = the page size in points
+    assert high.size == (1190, 1684)
 
 
 def test_render_page_rejects_bad_dpi(tmp_path: Path) -> None:

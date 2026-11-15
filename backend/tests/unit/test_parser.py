@@ -15,6 +15,7 @@ from app.services.backends import BaseBackend
 from app.services.parse_errors import DocumentLoadError, UnsupportedFileTypeError
 from app.services.parser import parse
 from PIL import Image
+from tests.pdfmaker import write_pdf
 
 
 class FakeBackend(BaseBackend):
@@ -30,13 +31,7 @@ class FakeBackend(BaseBackend):
 
 
 def _make_pdf(path: Path, lines: list[str]) -> None:
-    import fitz
-
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), "\n".join(lines))
-    doc.save(str(path))
-    doc.close()
+    write_pdf(path, ["\n".join(lines)])
 
 
 def test_parse_routes_pdf(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,13 +115,7 @@ def test_parse_pdf_runs_backend_over_pages_and_captures_pages(tmp_path: Path) ->
 
 def test_parse_pdf_multi_page_captures_per_page(tmp_path: Path) -> None:
     pdf = tmp_path / "multi.pdf"
-    import fitz
-
-    doc = fitz.open()
-    for _line in range(3):
-        doc.new_page()
-    doc.save(str(pdf))
-    doc.close()
+    write_pdf(pdf, [None, None, None])
 
     class PageNumberedBackend(BaseBackend):
         def __init__(self) -> None:

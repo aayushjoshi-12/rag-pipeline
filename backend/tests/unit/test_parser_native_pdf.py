@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 
-import fitz
 import pytest
 from app.config import Settings
 from app.services.backends import BaseBackend
 from app.services.parse_errors import DocumentLoadError
 from app.services.parser import parse
 from PIL import Image, ImageDraw
+from tests.pdfmaker import write_pdf
 
 
 class CountingBackend(BaseBackend):
@@ -31,26 +30,15 @@ class CountingBackend(BaseBackend):
 LONG = "The borrower must document twelve months of payment history on the account. " * 2
 
 
-def _scan_png() -> bytes:
+def _scan_image() -> Image.Image:
     img = Image.new("RGB", (300, 120), "white")
     ImageDraw.Draw(img).rectangle((20, 20, 200, 60), fill="black")  # pixels only, no text layer
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return buf.getvalue()
+    return img
 
 
 def make_pdf(path: Path, pages: list[str | None]) -> Path:
     """Text page for a string, image-only (scanned) page for None."""
-    doc = fitz.open()
-    for content in pages:
-        page = doc.new_page()
-        if content is None:
-            page.insert_image(fitz.Rect(72, 72, 372, 192), stream=_scan_png())
-        else:
-            page.insert_text((72, 72), content)
-    doc.save(str(path))
-    doc.close()
-    return path
+    return write_pdf(path, [_scan_image() if content is None else content for content in pages])
 
 
 def test_auto_uses_the_text_layer_and_never_calls_a_backend(tmp_path: Path) -> None:
@@ -103,6 +91,28 @@ def test_corrupt_pdf_is_a_document_load_error(tmp_path: Path) -> None:
     bad.write_bytes(b"%PDF-1.4 definitely not a pdf")
     with pytest.raises(DocumentLoadError):
         parse(bad, "pdf", settings=Settings())
+
+
+@pytest.mark.parametrize("mode", ["auto", "native", "image"])
+def test_empty_file_is_a_document_load_error(tmp_path: Path, mode: str) -> None:
+    empty = tmp_path / "empty.pdf"
+    empty.write_bytes(b"")
+    with pytest.raises(DocumentLoadError, match="Failed to load PDF"):
+        parse(empty, "pdf", settings=Settings(pdf_text_source=mode))
+
+
+@pytest.mark.parametrize("mode", ["auto", "native", "image"])
+def test_password_protected_pdf_is_a_document_load_error(tmp_path: Path, mode: str) -> None:
+    locked = write_pdf(tmp_path / "locked.pdf", ["secret text " * 10], encrypted=True)
+    with pytest.raises(DocumentLoadError, match="password"):
+        parse(locked, "pdf", settings=Settings(pdf_text_source=mode))
+
+
+def test_text_with_brackets_and_accents_survives_the_text_layer(tmp_path: Path) -> None:
+    pdf = write_pdf(tmp_path / "t.pdf", ["Section (b) of B3-5.1 \\ caf\u00e9 line one\nsecond line"])
+    res = parse(pdf, "pdf", settings=Settings(pdf_text_source="native"))
+    assert res.page_texts == ["Section (b) of B3-5.1 \\ caf\u00e9 line one\nsecond line"]
+    assert "\r" not in res.text  # pdfium's CRLF line ends are folded to \n
 
 
 def test_settings_validation() -> None:

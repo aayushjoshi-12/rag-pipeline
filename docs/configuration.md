@@ -448,8 +448,8 @@ limit the kernel picks whichever process is biggest, not the one that ran away.
   `docker compose up -d chroma api worker`, then `docker compose exec worker python -m app.manage reindex` (re-embeds the
   stored chunk text; no re-parsing). Stale `test_*` collections alone can be dropped with the Chroma client
   (`client.delete_collection("test_store")`).
-* **Scanned PDFs.** Pages that need OCR/vision are rendered one at a time (`render_page`) and MuPDF's image cache is
-  shrunk after each page. Before, all pages were rendered up front: at the default `PDF_DPI=300` a 200-page scan needs
+* **Scanned PDFs.** Pages that need OCR/vision are rendered one at a time (`render_page`) and every pdfium page and
+  bitmap is closed right after it is read. Before, all pages were rendered up front: at the default `PDF_DPI=300` a 200-page scan needs
   ~25 MB per page, about 4.4 GB, and was OOM-killed. `MAX_UPLOAD_SIZE_BYTES` (25 MiB) still bounds the file itself.
 * **Worker memory vs `WORKER_CONCURRENCY`.** Budget `~220 MiB + ~110 MiB x WORKER_CONCURRENCY` per worker, plus the
   peak of the documents in flight; set the request to the idle figure and the limit to idle + one large document per child.

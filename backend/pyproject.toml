@@ -22,7 +22,8 @@ dependencies = [
     "chromadb-client>=0.6",
     "openai>=1.58",
     "anthropic>=0.40",
-    "pymupdf>=1.24",
+    # PDF page count, native text layer and page renders (Apache-2.0 / BSD-3). Replaces PyMuPDF (AGPL-3.0), ADR-0002.
+    "pypdfium2>=4.30",
     # DOCX → markdown only: docling-slim + the Word backend. The full `docling` package pulls in
     # torch and layout/OCR models (GBs) that DOCX conversion never uses.
     "docling-slim[format-docx,format-pdf-pypdfium2]>=2.3",

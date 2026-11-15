@@ -15,6 +15,7 @@ import pytest
 from app.config import Settings
 from app.services.parse_errors import DocumentLoadError
 from app.services.parser import parse
+from tests.pdfmaker import write_pdf
 
 
 def test_parse_docx_via_docling_returns_markdown(synthetic_docx: Path) -> None:
@@ -28,14 +29,7 @@ def test_parse_docx_via_docling_returns_markdown(synthetic_docx: Path) -> None:
 
 @pytest.mark.skipif(shutil.which("tesseract") is None, reason="tesseract not installed")
 def test_parse_pdf_via_real_tesseract_ocr(tmp_path: Path) -> None:
-    import fitz
-
-    pdf = tmp_path / "ocr.pdf"
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), "RAG pipeline OCR smoke 2026")
-    doc.save(str(pdf))
-    doc.close()
+    pdf = write_pdf(tmp_path / "ocr.pdf", ["RAG pipeline OCR smoke 2026"])
 
     result = parse(pdf, "pdf", settings=Settings(parser_provider="ocr"))
 
@@ -46,13 +40,7 @@ def test_parse_pdf_via_real_tesseract_ocr(tmp_path: Path) -> None:
 
 
 def test_parse_pdf_without_real_backend_raises_for_missing_openrouter_key(tmp_path: Path) -> None:
-    import fitz
-
-    pdf = tmp_path / "vision.pdf"
-    doc = fitz.open()
-    doc.new_page()
-    doc.save(str(pdf))
-    doc.close()
+    pdf = write_pdf(tmp_path / "vision.pdf", [None])
 
     from app.services.parse_errors import InvalidBackendError
 
