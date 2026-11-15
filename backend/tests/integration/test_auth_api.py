@@ -119,7 +119,9 @@ async def test_permission_matrix(env: Env, method: str, path: str, perm: Permiss
 
 
 async def test_health_is_public(env: Env) -> None:
-    assert (await env.client.get("/health")).status_code != 401
+    resp = await env.client.get("/health")
+    assert resp.status_code != 401
+    assert isinstance(resp.json()["auth_enabled"], bool)  # the dashboard reads this to decide on the login form
 
 
 async def test_refresh_token_cannot_authenticate_requests(env: Env) -> None:

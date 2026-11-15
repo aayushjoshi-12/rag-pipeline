@@ -1091,7 +1091,11 @@ input.switch:checked::after {
 }
 .cell-main {
   max-width: 0;
+  min-width: 9rem; /* the name column keeps a readable share; the table scrolls inside its card instead */
   width: 55%;
+}
+.cell-main .truncate {
+  display: block; /* an inline span ignores overflow/ellipsis and paints over the next cell */
 }
 .cell-trunc {
   max-width: 10.5rem;

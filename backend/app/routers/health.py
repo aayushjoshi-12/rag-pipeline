@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, Response, status
 
+from app.routers.deps import get_settings
 from app.services.health import run_health_checks
 
 router = APIRouter()
@@ -14,6 +15,8 @@ async def health() -> Response:
     checks = await run_health_checks()
     payload: dict[str, Any] = {
         "status": "ok",
+        # Public on purpose (no secret): lets the dashboard skip the login form / the /auth/me probe correctly.
+        "auth_enabled": get_settings().auth_enabled,
         "checks": {
             c.name: {"ok": c.ok, "detail": c.detail} for c in checks
         },

@@ -23,6 +23,18 @@ export const useAuth = create<AuthState>((set) => ({
   error: null,
 
   bootstrap: async () => {
+    // No stored session: only probe /auth/me when the server says auth is off; on an auth-enabled server the
+    // probe would just 401 (and log a console error). /health is public. If it cannot tell, fall back to the probe.
+    if (!hasStoredSession()) {
+      try {
+        if ((await api.health()).auth_enabled !== false) {
+          set({ status: 'anonymous', me: null })
+          return
+        }
+      } catch {
+        /* unknown: fall through to the /auth/me probe */
+      }
+    }
     try {
       // Works with no token when the server runs with AUTH_ENABLED=false.
       set({ status: 'authenticated', me: await api.me(), error: null })

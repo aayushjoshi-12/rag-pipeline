@@ -118,6 +118,8 @@ export interface HealthCheck {
 
 export interface HealthResponse {
   status: 'ok' | 'degraded'
+  /** Public flag: false when the server runs with AUTH_ENABLED=false (the dashboard then skips login). */
+  auth_enabled?: boolean
   checks: Record<string, HealthCheck>
 }
 

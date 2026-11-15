@@ -3,7 +3,7 @@ import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
-import { clearTokens, getTokens } from '../auth/session'
+import { clearTokens, getTokens, setTokens } from '../auth/session'
 import { useAuth } from '../store/auth'
 import { ALL_PERMISSIONS, doc, renderAt, resetStore, signInAs } from '../test/helpers'
 import type { ManagedUser, Role } from '../types'
@@ -57,10 +57,11 @@ const user = (over: Partial<ManagedUser> = {}): ManagedUser => ({
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.unstubAllEnvs()
   clearTokens()
   resetStore()
   m.listDocuments.mockResolvedValue([])
-  m.health.mockResolvedValue({ status: 'ok', checks: {} })
+  m.health.mockResolvedValue({ status: 'ok', auth_enabled: true, checks: {} })
   m.listPermissions.mockResolvedValue(
     ALL_PERMISSIONS.map((name) => ({ name, description: `${name} desc` })),
   )
@@ -77,7 +78,6 @@ describe('sign in', () => {
   })
 
   it('logs in, stores the tokens and shows the app for that user', async () => {
-    m.me.mockRejectedValueOnce(new Error('not authenticated'))
     m.login.mockResolvedValue({
       access_token: 'acc',
       refresh_token: 'ref',
@@ -112,7 +112,27 @@ describe('sign in', () => {
     expect(getTokens()).toBeNull()
   })
 
+  it('does not probe /auth/me when no session is stored (it would only 401 into the console)', async () => {
+    renderAt('/')
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(m.me).not.toHaveBeenCalled()
+  })
+
+  it('validates a stored session with /auth/me', async () => {
+    setTokens({ access: 'acc', refresh: 'ref' })
+    m.me.mockResolvedValue({
+      id: 'u1',
+      email: 'dana@example.test',
+      permissions: ['documents:read'],
+      auth_enabled: true,
+    })
+    renderAt('/')
+    expect(await screen.findByTestId('whoami')).toHaveTextContent('dana@example.test')
+    expect(m.me).toHaveBeenCalledTimes(1)
+  })
+
   it('skips the login form when the server has auth disabled', async () => {
+    m.health.mockResolvedValue({ status: 'ok', auth_enabled: false, checks: {} })
     m.me.mockResolvedValue({
       id: null,
       email: 'anonymous',
