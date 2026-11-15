@@ -1,4 +1,49 @@
-# Performance: query cache
+# Performance
+
+Everything here was measured on one Apple M4 laptop (16 GB, Docker Desktop VM 7.7 GB, local Ollama for embeddings) against the real Fannie Mae Selling Guide
+chapters B3-4 and B3-5 (2 documents, 777 chunks) unless a row says otherwise. These are laptop numbers: useful for "what does it feel like" and for relative
+comparisons, not capacity planning. Raw data and methods are linked from each section. The longer cache write-up is further down.
+
+## At a glance (plain language)
+
+- **Repeat questions are about 10x faster.** A repeated search drops from ~50 ms to ~5 ms (median), and the cache never serves a stale answer: ingest, delete, replace and reindex invalidate it immediately.
+- **A cached chat answer comes back in ~25 ms instead of ~3 seconds, and costs nothing.** 180 of 180 repeated questions were served from cache with no LLM call.
+- **The cache costs almost nothing when it misses.** With 100% unique questions it adds under 4 ms, and if Redis goes down the app keeps answering (uncached) in ~50 ms without errors, then recovers on its own in about 10 s.
+- **A 50-page PDF is searchable in about 20 seconds.** Two chapters (42 and 53 pages, 777 chunks) finished ingesting in ~21 s each, in parallel, with local embeddings and no OCR cost: the PDF text layer is read in under a second.
+- **A chat answer costs a few thousandths of a cent.** One real answer on a small paid model was 348 tokens in / 174 out = $0.0000139, roughly 70,000 short answers per dollar. Embeddings on the local model are free.
+- **Streaming shows sources in a fraction of a second.** Sources appear in 0.1-0.25 s; the first answer token takes ~1 s on a small model (it was ~5 s on the free reasoning model, which thinks silently first).
+- **It scales out on Kubernetes by itself.** In a local kind cluster the autoscaler grew the API from 2 to 8 pods under load and served 13,254 searches in 4 minutes with zero errors, then shrank back in ~3m40s.
+- **Settings changes reach every replica in under 3 seconds** (measured 2.1-2.9 s across two API pods), no restart.
+- **Editing a document re-embeds only what changed.** Content-defined chunking kept 46% of chunks identical between two real versions of a chapter, where fixed-size chunking kept 1%, so a small edit does not mean re-embedding the whole document.
+- **Small and well tested.** The API idles at ~170-190 MB and peaked at ~360 MB under that load; 1,400+ backend and 300+ frontend tests pass, and the key tests were mutation-checked (break the code, watch the test fail).
+
+## Raw numbers
+
+| What | Number | Conditions | Source |
+|---|---|---|---|
+| `/search` median latency, semantic / hybrid, cache off | 50.1 / 49.2 ms | 1 client, top_k 5 | cache benchmark (below) |
+| `/search` median latency, keyword (BM25), cache off | 9.7 ms | 1 client | cache benchmark |
+| `/search` median latency, cache on, repeating workload | 5.1 / 4.5 / 4.3 ms (semantic / hybrid / keyword) | ~80% repeats (Zipf 1.1), cold start included | cache benchmark |
+| `/search` throughput, cache off -> on | 19.7 -> 77.8 req/s (semantic), 20.1 -> 75.1 (hybrid), 104 -> 183 (keyword) | 1 client | cache benchmark |
+| `/search` at 8 concurrent clients, cache off -> on | p50 164 -> 19.4 ms (semantic), throughput 46 -> 192 req/s | 8 clients | cache benchmark |
+| Cache miss overhead | +0.3 ms keyword, +1.6 ms semantic, +3.9 ms hybrid (p50) | all-unique queries, 1 client | cache benchmark |
+| `/chat` cold (real LLM) | median 3,173 ms, max 6,600 ms | 12 questions, free reasoning model | cache benchmark |
+| `/chat` cache hit | p50 25 ms, p95 67 ms, p99 95 ms, 261 req/s | 180 requests, 8 clients, 100% hits | cache benchmark |
+| Ingest, 42-page chapter (372 chunks) / 53-page chapter (405 chunks) | 20.6 s / 21.7 s end to end | both at once, native PDF text, local `mxbai-embed-large` | worker log, ticket 37 run |
+| PDF text extraction, 42-53 pages | < 1 s | native text layer, no OCR | worker log |
+| Retrieval quality, 12 labelled questions, top 5 | semantic 8/12, keyword BM25 10/12, hybrid RRF 9/12 (first-place: 7/7/7) | 388 chunks; 3 identical runs; a 1-2 question difference is not significant | ticket 23 report |
+| Retrieval latency by mode (retriever only) | semantic 64 ms, BM25 17 ms, hybrid RRF 52 ms | Chroma; pgvector semantic 75 ms | ticket 23 report |
+| Chat answer cost (paid model) | $0.0000139 for 348 in / 174 out tokens | meta-llama/llama-3.1-8b-instruct via OpenRouter | trace row, ticket 45 smoke |
+| Streaming: sources / first token / done | 0.09-0.25 s / 0.98 s / 4.4 s (small paid model, in a kind cluster); first token ~4.5-5 s on the free reasoning model | `/chat/stream` | tickets 38, 20 |
+| Kubernetes autoscaling | API 2 -> 7 -> 8 pods (cap), 13,254 requests in 240 s (~55 req/s), 0 errors, scale-down to 2 in ~3m40s | kind on the same laptop, cache bypassed | ticket 20/25 kind report |
+| API memory | 167 -> 193 MB over 240 requests (flat after the Chroma-client leak fix); peak ~360 MB under the autoscaler load | idle/steady vs load | tickets 37, 20 |
+| Settings propagation across replicas | 2.1-2.9 s (limit 5 s) | 2 API pods | ticket 43 smoke |
+| Chunk reuse between two real document versions | 46.3% identical (CDC) vs 0-1% (fixed-size) | Selling Guide B3-5, v1 vs v2 | ticket 21 report |
+
+Honest limits: one machine, 777 chunks, synthetic repeat distribution, a free reasoning model for the cold chat numbers, and 12 labelled questions for retrieval quality.
+Retrieval time grows with corpus size; the *saved* time (the embedding call) mostly does not. Memory limits and sizing rules are being measured separately (ticket 48).
+
+# Query cache benchmark
 
 Measured with `scripts/bench_cache.py` on the real stack (Docker Compose: API, worker, Postgres, Redis, Chroma server) and the real
 Fannie Mae Selling Guide chapters B3-4 and B3-5 (2 documents, 777 chunks). Raw results: [`performance-cache-bench.json`](./performance-cache-bench.json).

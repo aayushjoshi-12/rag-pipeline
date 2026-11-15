@@ -83,6 +83,17 @@ knobs choose where vectors live and how they are indexed; changing them on exist
 `RETRIEVAL_KEYWORD_METHOD` (bm25 | postgres_fts), `RETRIEVAL_FUSION` (rrf | weighted) and the BM25 / RRF / weight knobs choose how chunks are
 found; `semantic` (embeddings only) is the default. Every key is listed in [`docs/configuration.md`](docs/configuration.md).
 
+## By the numbers
+
+Measured on one laptop (Apple M4) with real Fannie Mae Selling Guide chapters; method, raw data and caveats in [docs/performance.md](docs/performance.md).
+
+- **~10x faster repeat searches** (50 ms -> 5 ms median) and **chat answers in ~25 ms instead of ~3 s, free, when cached**, without ever serving stale data.
+- **A 50-page PDF is searchable in ~20 seconds**; editing a document re-embeds only the chunks that changed (46% of chunks stayed identical between two real versions, vs 1% with fixed-size chunking).
+- **A chat answer costs ~$0.00001** on a small model (roughly 70,000 answers per dollar); local embeddings are free.
+- **Sources appear in under 0.25 s** while the answer streams.
+- **Autoscaled 2 -> 8 API pods on a laptop Kubernetes cluster**, 13,254 searches in 4 minutes, **zero errors**; settings changes reach every replica in under 3 s.
+- **If Redis dies, the app keeps answering** (uncached, ~50 ms) and heals itself; **1,400+ backend and 300+ frontend tests**, key ones mutation-checked.
+
 ## API
 
 All routes except `/health` and `/auth/login|refresh` need a bearer token (or an API key) with the listed permission.
