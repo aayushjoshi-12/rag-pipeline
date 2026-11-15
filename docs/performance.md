@@ -41,7 +41,22 @@ comparisons, not capacity planning. Raw data and methods are linked from each se
 | Chunk reuse between two real document versions | 46.3% identical (CDC) vs 0-1% (fixed-size) | Selling Guide B3-5, v1 vs v2 | ticket 21 report |
 
 Honest limits: one machine, 777 chunks, synthetic repeat distribution, a free reasoning model for the cold chat numbers, and 12 labelled questions for retrieval quality.
-Retrieval time grows with corpus size; the *saved* time (the embedding call) mostly does not. Memory limits and sizing rules are being measured separately (ticket 48).
+Retrieval time grows with corpus size; the *saved* time (the embedding call) mostly does not. Memory is covered in the next section.
+
+## Memory (measured after the memory work, tickets 48/49)
+
+| What | Before | After | Notes |
+|---|---|---|---|
+| Worker idle | 1.05 GiB | 444 MiB | Celery now starts 2 child processes by default (`WORKER_CONCURRENCY`) instead of one per CPU core; add worker replicas to scale |
+| 200-page scanned PDF, parse | OOM-killed at 4.4 GB | peak 276 MiB | pages are rendered and read one at a time; the 200-page text PDF peaks at 182 MiB |
+| DOCX ingest (worker) | not measured | peak 213 MiB (+45 MiB) | torch/docling are not even imported at idle |
+| API during 4 uploads | not measured | 158 -> 275 MiB | uploads stream in 1 MiB chunks |
+| Chroma server idle (804 vectors) | 931 MiB | 68 MiB | after recreating it with the LRU index-cache config |
+| Chroma after ingest + delete of a 200-page PDF, 4 cycles | 1.39 GiB | 233 MiB | upstream Chroma keeps deleted indexes in memory: restart it after a mass delete or reindex (documented) |
+| Chroma under 10 min of search load (330k queries) | n/a | 59 -> 75 MiB | search itself does not grow memory |
+
+Compose now caps chroma at 1.5 GB, the API at 1 GB and the worker at 3 GB, so one runaway container is killed and restarted alone instead of the Docker VM killing a random one.
+Not measured: Chroma beyond ~3k vectors per collection (the sizing rule in `docs/configuration.md` is extrapolated), and the K8s limits were only tested structurally after this change.
 
 # Query cache benchmark
 
