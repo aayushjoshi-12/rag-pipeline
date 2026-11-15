@@ -423,19 +423,31 @@ limit the kernel picks whichever process is biggest, not the one that ran away.
 |---|---|---|---|---|
 | chroma | ~70 MiB (800 vectors) | vectors (~4x their raw float32 size, see rule), **every collection ever written to, even after it is deleted** | `mem_limit 1536m` | 512Mi / 1Gi |
 | api | ~160 MiB | uploads stream to disk in 1 MiB chunks (`MAX_UPLOAD_SIZE_BYTES`); ~275 MiB after three 200-page ingests | `mem_limit 1g` | 256Mi / 1Gi (prod 2Gi) |
-| worker | ~445 MiB at `WORKER_CONCURRENCY=2` (was ~1.1 GiB with Celery's default of one child per host CPU) | one ingest per child; after three 200-page text-PDF ingests (1827 chunks each) ~570 MiB (it creeps ~25 MiB per ingest, ticket 52), a 200-page *scanned* PDF ~280 MiB per process, a DOCX +45 MiB | `mem_limit 3g` | 512Mi / 3Gi (prod 4Gi) |
+| worker | ~445 MiB at `WORKER_CONCURRENCY=2` (was ~1.1 GiB with Celery's default of one child per host CPU) | one ingest per child; after three 200-page text-PDF ingests (1827 chunks each) ~570 MiB (ticket 52 re-measured: 20 small ingest+delete cycles move the worker 357 -> 369 MiB and the api 195 -> 196 MiB anon, i.e. no leak; six 500 KB / ~600-chunk documents: worker 473 -> 550 anon, api 197 -> 215, still drifting up slowly: probably allocator high-water, not proven either way), a 200-page *scanned* PDF ~280 MiB per process, a DOCX +45 MiB | `mem_limit 3g` | 512Mi / 3Gi (prod 4Gi) |
+| beat | ~176 MiB (cold-start peak ~180 MiB; it imports every task module through `include=`) | nothing: a tick only publishes a message | `mem_limit 384m` | 192Mi / 384Mi |
 
 * **Chroma sizing rule.** `memory ~= 150 MiB + 16 bytes x embedding dimension x vectors`. 512Mi/1Gi therefore holds about
   40k vectors of 1024 dimensions; double the limit for every doubling. Vectors in Postgres are not part of this.
-* **Chroma leaks on delete (upstream, chroma 1.4.4).** A collection that was written to keeps its HNSW index in memory after
-  `delete_collection`, and deleting/re-adding vectors inside one collection keeps the old graph too: 10 `reindex` runs of
-  2768 x 1024 vectors grew the server 68 -> 236 MiB (~17 MiB per run, a full index each). Creating, writing and deleting
-  small collections in a loop cost ~3 MiB each with the default config and ~0.15 MiB with the bounded cache below.
-  The Compose and K8s Chroma therefore mount `chroma/config.yaml` (`hnsw_index_pool_cache_config.lru.capacity: 16`).
-  It fixes the many-small-collections case (tests, `CHROMA_COLLECTION` per tenant), **not** repeated reindexing of one big
-  collection: after a reindex or a mass delete, restart Chroma to return the memory (`docker compose restart chroma`,
-  `kubectl -n rag-pipeline rollout restart deploy/chroma`; the data is on the volume). With the memory limit set, the
-  worst case is that Chroma alone is OOM-killed and restarted, not a random service.
+* **Chroma leaks on delete (upstream, chroma 1.4.4 server, image `chromadb/chroma:1.5.9`).** A collection that was
+  written to keeps its HNSW index in memory after `delete_collection`, and deleting/re-adding vectors inside one
+  collection keeps the old graph too (small collections: ~3 MiB each with the default config, ~0.15 MiB with the
+  bounded cache below; measured 2768 x 1024 vectors: ~15 MiB per drop-and-recreate reindex). Therefore:
+  `reindex` no longer drops a Chroma collection when nothing drifted: it upserts every vector and deletes the ids that
+  are no longer chunks (ticket 51; measured **15.0 -> 0.5 MiB per reindex**, though a rewrite in place takes longer, ~12 s vs ~3 s
+  for 2768 vectors). It still drops and recreates when `verify()` reports drift (metric, HNSW parameters, dimension),
+  which is the only way to apply new index parameters, and that path still leaves one index behind: restart Chroma
+  afterwards (`docker compose restart chroma`, `kubectl -n rag-pipeline rollout restart deploy/chroma`; the data is on
+  the volume). The Compose and K8s Chroma mount `chroma/config.yaml` (`hnsw_index_pool_cache_config.lru.capacity: 16`).
+  With the memory limit set, the worst case is that Chroma alone is OOM-killed and restarted.
+* **The image tag is pinned** (`chromadb/chroma:1.5.9` in Compose, `k8s/base/chroma`, CI; recorded in
+  `chroma/config.yaml`) because this behaviour is version dependent. Bump all places together and re-measure.
+* **Tests never touch the dev Chroma** (ticket 50): `make check` runs the Chroma tests on a throwaway `chroma-test`
+  container (:8002, tmpfs). A dev Chroma that was used by older test runs holds thousands of orphan HNSW segment
+  directories on its volume (6928 / 260 MB seen) and keeps their indexes in memory. One-off cleanup, only after
+  `docker compose stop chroma api worker`: back up nothing (vectors are rebuildable), `docker volume rm rag-pipeline_chroma-data`,
+  `docker compose up -d chroma api worker`, then `docker compose exec worker python -m app.manage reindex` (re-embeds the
+  stored chunk text; no re-parsing). Stale `test_*` collections alone can be dropped with the Chroma client
+  (`client.delete_collection("test_store")`).
 * **Scanned PDFs.** Pages that need OCR/vision are rendered one at a time (`render_page`) and MuPDF's image cache is
   shrunk after each page. Before, all pages were rendered up front: at the default `PDF_DPI=300` a 200-page scan needs
   ~25 MB per page, about 4.4 GB, and was OOM-killed. `MAX_UPLOAD_SIZE_BYTES` (25 MiB) still bounds the file itself.

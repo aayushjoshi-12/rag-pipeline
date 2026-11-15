@@ -265,6 +265,9 @@ def test_memory_requests_and_limits_for_the_big_three(docs: list[dict[str, Any]]
     for name in ("chroma", "rag-pipeline-api", "rag-pipeline-worker"):
         res = specs[name]["spec"]["containers"][0]["resources"]
         assert _mem(res["requests"]["memory"]) <= _mem(res["limits"]["memory"]), name
+    beat = specs["rag-pipeline-beat"]["spec"]["containers"][0]["resources"]
+    # measured in the real image (ticket 52): beat idles at ~176 MiB and peaks ~180 MiB on a cold start
+    assert _mem(beat["requests"]["memory"]) >= 176 * 2**20 and _mem(beat["limits"]["memory"]) >= 300 * 2**20
     worker = specs["rag-pipeline-worker"]["spec"]["containers"][0]["resources"]
     # measured idle RSS of a worker at the default WORKER_CONCURRENCY=2 is ~445 MiB: a smaller request under-counts it
     assert _mem(worker["requests"]["memory"]) >= 480 * 2**20

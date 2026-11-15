@@ -20,7 +20,7 @@ spec:
       enableServiceLinks: false
       containers:
         - name: chroma
-          image: chromadb/chroma:latest
+          image: chromadb/chroma:1.5.9  # pinned, see chroma/config.yaml
           ports:
             - containerPort: 8000
           volumeMounts:

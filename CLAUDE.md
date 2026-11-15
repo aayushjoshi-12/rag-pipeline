@@ -263,6 +263,12 @@ Coverage target: 70% on new code. Aim for it.
   real throwaway Postgres (never SQLite, never the dev `rag` DB), the lifespan actually runs. Replace external clients
   (LLM, Chroma, Redis) with fakes in test setup — not by monkeypatching modules.
 - Suites run with `CACHE_ENABLED=false` (the query cache lives in a shared Redis); cache tests opt in on Redis db 13 and use a real Redis on purpose (invalidation, TTL and fail-open are the behaviour under test).
+- **Chroma tests use a throwaway Chroma, never the dev one.** `make check` starts `chroma-test` (Compose profile `test`,
+  :8002, tmpfs, pinned image, memory-capped), runs everything and always removes it; for a bare `make backend-test`
+  run `make chroma-test-up` first. Tests read `CHROMA_TEST_HOST`/`CHROMA_TEST_PORT` (default `localhost:8002`);
+  `tests/conftest.py` refuses any other Chroma address and, if the server is unreachable, **fails** loudly (skips
+  only with `RAG_TEST_ALLOW_NO_CHROMA=1`). Reason: Chroma keeps every written index in memory, and tests that
+  churned the dev server grew it ~350 MiB per run (ticket 50).
 - **Don't make real API calls in tests** (no live OpenAI/Anthropic/Chroma/Redis). Use
   `pytest-httpx`, `MagicMock`, or in-memory fakes.
 

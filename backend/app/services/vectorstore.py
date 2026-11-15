@@ -339,6 +339,19 @@ class ChromaStore:
         if ids:
             self._collection.update(ids=ids, metadatas=cast(Any, metadatas))
 
+    #: ``reindex_all`` may rewrite this store in place (upsert + delete stale ids) while ``verify()`` is clean.
+    #: Chroma keeps the HNSW index of a deleted collection in server memory (~17 MiB per 2768 x 1024 reindex).
+    supports_in_place_reindex = True
+
+    def all_ids(self) -> list[str]:
+        """Every vector id in the collection (ids only: no documents or embeddings are fetched)."""
+        ids: list[str] = []
+        while True:
+            page = self._collection.get(limit=5000, offset=len(ids), include=[])["ids"]
+            ids.extend(page)
+            if len(page) < 5000:
+                return ids
+
     def reset(self) -> None:
         name = self._collection.name
         self._client.delete_collection(name=name)

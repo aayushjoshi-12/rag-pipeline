@@ -33,8 +33,9 @@ jobs:
         options: >-
           --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
       chroma:
-        image: chromadb/chroma:latest
-        ports: ["8001:8000"]
+        image: chromadb/chroma:1.5.9
+        # the test suite talks to CHROMA_TEST_HOST/PORT (default localhost:8002), see backend/tests/conftest.py
+        ports: ["8002:8000"]
     defaults:
       run:
         working-directory: backend

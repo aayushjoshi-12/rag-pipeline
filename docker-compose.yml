@@ -73,7 +73,7 @@ services:
       retries: 10
 
   chroma:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:1.5.9  # pinned (ticket 52): chroma/config.yaml records why
     restart: unless-stopped  # data services come back after a Docker/host restart
     container_name: rag-pipeline-chroma
     ports:
@@ -89,6 +89,21 @@ services:
     # Sizing and measurements: docs/configuration.md "Memory".
     mem_limit: 1536m
     mem_reservation: 512m
+
+  # Throwaway Chroma for the test suite (ticket 50): `make check` starts it, runs the Chroma-using tests against it
+  # (CHROMA_TEST_HOST/PORT, default localhost:8002) and removes it, so tests never create collections in the dev
+  # Chroma above. Same pinned image and config; no volume (tmpfs), memory-capped. Start by hand: `make chroma-test-up`.
+  chroma-test:
+    image: chromadb/chroma:1.5.9
+    container_name: rag-pipeline-chroma-test
+    profiles: ["test"]
+    ports:
+      - "8002:8000"
+    tmpfs:
+      - /data
+    volumes:
+      - ./chroma/config.yaml:/config.yaml:ro
+    mem_limit: 768m
 
   # Optional local S3 emulator for STORAGE_BACKEND=s3 / s3:// ingest. Only started with
   # `docker compose --profile s3 up -d floci floci-init` (the default `docker compose up` is unchanged).
@@ -173,6 +188,9 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    # idle ~176 MiB, cold-start peak ~180 MiB (ticket 52: it imports every task module through `include=`)
+    mem_limit: 384m
+    mem_reservation: 192m
 
   frontend:
     # Optional dashboard. `make up` enables the "ui" profile; `make up-api` (API only) does not.

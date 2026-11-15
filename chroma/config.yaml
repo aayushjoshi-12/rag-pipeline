@@ -6,6 +6,11 @@
 # anonymous memory even after it is deleted: 400 create/add/delete cycles grew the server 16 MiB -> 1.2 GiB, and
 # every `reindex` (delete + recreate the collection) leaks one full index. With an LRU of 16 the same loop stays
 # near 0.1-0.2 MiB per cycle. Evicted indexes are reloaded from /data on the next query.
+#
+# Image pin (ticket 52): chromadb/chroma:1.5.9 in docker-compose.yml (chroma + chroma-test), k8s/base/chroma and
+# .github/workflows/ci.yml. That tag is the same image digest (sha256:1e0b73a187a2...) the unpinned `latest` resolved to
+# when the memory behaviour above was measured; the server binary reports itself as 1.4.4. Bump all four places together
+# (a unit test checks they agree) and re-run the ticket 48/51 measurements before trusting the numbers on a new version.
 persist_path: "/data"
 segment_manager:
   hnsw_index_pool_cache_config:

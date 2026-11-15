@@ -1,7 +1,7 @@
 .PHONY: help install backend-install frontend-install \
         backend-test backend-lint backend-fmt backend-typecheck backend-check \
         frontend-lint frontend-typecheck frontend-test frontend-check \
-        check fmt \
+        check chroma-test-up chroma-test-down fmt \
         run run-backend run-frontend \
         db-up db-down migrate \
         up up-api down logs openapi \
@@ -13,6 +13,8 @@ help:
 	@echo "Targets:"
 	@echo "  install        Sync backend + frontend deps"
 	@echo "  check          Full quality gate: lint + typecheck + test (backend & frontend)"
+	@echo "                 (starts a throwaway Chroma on :8002 for the tests and removes it afterwards)"
+	@echo "  chroma-test-up/-down  Start/stop that throwaway Chroma by hand (a bare 'make backend-test' needs it)"
 	@echo "  fmt            Apply ruff format to backend"
 	@echo "  run            Run backend + frontend locally (no Docker)"
 	@echo "  run-backend    Run FastAPI locally with reload (:8000)"
@@ -67,7 +69,22 @@ frontend-test:
 frontend-check:
 	@(cd frontend && npm run lint) & P1=$$!; (cd frontend && npm run test:run) & P2=$$!; (cd frontend && npx tsc -b) & P3=$$!; wait $$P1; R1=$$?; wait $$P2; R2=$$?; wait $$P3; R3=$$?; exit $$((R1 | R2 | R3))
 
-check: backend-check frontend-check
+# Chroma-using tests run against a throwaway container (compose profile `test`, :8002, tmpfs), never the dev Chroma.
+# `check` always tears it down, also when a check fails, and exits with the checks' status.
+CHROMA_TEST_PORT ?= 8002
+
+chroma-test-up:
+	docker compose --profile test up -d chroma-test
+	@for i in $$(seq 1 60); do curl -sf http://localhost:$(CHROMA_TEST_PORT)/api/v2/heartbeat >/dev/null && exit 0; sleep 1; done; \
+	  echo "chroma-test did not become healthy on :$(CHROMA_TEST_PORT)"; exit 1
+
+chroma-test-down:
+	-docker compose --profile test rm --stop --force --volumes chroma-test
+
+check:
+	@$(MAKE) --no-print-directory chroma-test-up || { $(MAKE) --no-print-directory chroma-test-down; exit 1; }; \
+	$(MAKE) --no-print-directory backend-check frontend-check; R=$$?; \
+	$(MAKE) --no-print-directory chroma-test-down; exit $$R
 
 openapi:
 	cd backend && uv run python -m app.openapi_contract export

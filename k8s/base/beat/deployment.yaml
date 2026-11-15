@@ -41,10 +41,12 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          # Measured in this image (ticket 52): cold start peak ~180 MiB, steady ~176 MiB (it imports every task module
+          # through `include=`; a tick only publishes a message). The old 128Mi request under-counted it.
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 192Mi
             limits:
               cpu: 200m
-              memory: 256Mi
+              memory: 384Mi

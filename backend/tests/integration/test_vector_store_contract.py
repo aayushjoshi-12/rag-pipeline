@@ -1,6 +1,6 @@
 """One contract suite, run against BOTH vector stores on real services.
 
-Chroma = the compose server on :8001 (throwaway collection per test); pgvector = the isolated,
+Chroma = the throwaway `chroma-test` server on :8002 (throwaway collection per test); pgvector = the isolated,
 migrated test database (throwaway table per test). Vectors are synthetic; nothing calls an LLM.
 """
 

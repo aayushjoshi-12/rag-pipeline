@@ -22,11 +22,20 @@ os.environ["RAG_ENV_FILE"] = os.devnull
 # The query cache lives in a shared Redis: suites that do not test it must not read or write it.
 # Cache tests opt in with an explicit ``Settings(cache_enabled=True, cache_redis_url=<db 13>)``.
 os.environ["CACHE_ENABLED"] = "false"
+# Chroma-using tests talk to a THROWAWAY Chroma (compose service `chroma-test`, started by `make check`), never the
+# developer's Chroma: they create and delete collections, and Chroma keeps every written index in memory (ticket 50).
+os.environ.setdefault("CHROMA_TEST_HOST", "localhost")
+os.environ.setdefault("CHROMA_TEST_PORT", "8002")
+os.environ["CHROMA_HOST"] = os.environ["CHROMA_TEST_HOST"]
+os.environ["CHROMA_PORT"] = os.environ["CHROMA_TEST_PORT"]
 
 from app.config import Settings
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+
+CHROMA_TEST_HOST = os.environ["CHROMA_TEST_HOST"]
+CHROMA_TEST_PORT = int(os.environ["CHROMA_TEST_PORT"])
 
 _CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -209,3 +218,48 @@ def _fresh_chroma_clients() -> Iterator[None]:
     vectorstore._chroma_clients.clear()
     yield
     vectorstore._chroma_clients.clear()
+
+
+_chroma_probe: list[str | None] = []  # [] = not probed yet; [None] = reachable; [reason] = unreachable
+
+
+def _probe_test_chroma() -> str | None:
+    import httpx
+
+    if not _chroma_probe:
+        try:
+            httpx.get(f"http://{CHROMA_TEST_HOST}:{CHROMA_TEST_PORT}/api/v2/heartbeat", timeout=3).raise_for_status()
+            _chroma_probe.append(None)
+        except Exception as exc:
+            _chroma_probe.append(
+                f"the throwaway test Chroma is not reachable at {CHROMA_TEST_HOST}:{CHROMA_TEST_PORT} "
+                f"({type(exc).__name__}); start it with `make chroma-test-up` (or run `make check`). Tests never "
+                "fall back to the dev Chroma. Set RAG_TEST_ALLOW_NO_CHROMA=1 to skip the Chroma tests instead."
+            )
+    return _chroma_probe[0]
+
+
+@pytest.fixture(autouse=True)
+def _chroma_only_the_test_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every real ``chromadb.HttpClient`` a test (or the app code it drives) opens must target the throwaway Chroma.
+
+    Unreachable: fail loudly, or skip when ``RAG_TEST_ALLOW_NO_CHROMA=1``. A different host/port (e.g. the dev
+    Chroma on :8001) is refused. Tests that install their own fake ``HttpClient`` override this wrapper.
+    """
+    import chromadb
+
+    real = chromadb.HttpClient
+
+    def guarded(*args: Any, **kwargs: Any) -> Any:
+        host, port = kwargs.get("host", "localhost"), int(kwargs.get("port", 8000))
+        if (host, port) != (CHROMA_TEST_HOST, CHROMA_TEST_PORT):
+            pytest.fail(f"a test opened Chroma at {host}:{port}; tests may only use {CHROMA_TEST_HOST}:{CHROMA_TEST_PORT}")
+        reason = _probe_test_chroma()
+        if reason:
+            if os.environ.get("RAG_TEST_ALLOW_NO_CHROMA") == "1":
+                pytest.skip(reason)
+            pytest.fail(reason)
+        return real(*args, **kwargs)
+
+    guarded.probe = _chroma_probe  # type: ignore[attr-defined]  # lets the guard's own tests fake an unreachable server
+    monkeypatch.setattr(chromadb, "HttpClient", guarded)

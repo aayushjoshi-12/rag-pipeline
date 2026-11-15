@@ -114,7 +114,7 @@ def test_default_settings_accept_a_collection_created_the_way_the_app_always_did
     """Backwards compatibility: no VECTOR_* set + a collection created with Chroma defaults (as the
     pre-ticket-24 app did) must verify cleanly and keep l2 / M16 / efC100 / efS100."""
     name = f"test_legacy_{uuid.uuid4().hex[:10]}"
-    client = chromadb.HttpClient(host="localhost", port=8001)
+    client = chromadb.HttpClient(host=Settings().chroma_host, port=Settings().chroma_port)
     try:
         client.get_or_create_collection(name=name)  # no configuration, exactly the old call
         legacy = ChromaStore(collection_name=name, vector_settings=resolve_vector_settings(Settings(), "chroma"))

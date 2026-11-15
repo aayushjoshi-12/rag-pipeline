@@ -1,6 +1,6 @@
 """Integration tests for ChromaStore against the compose Chroma server.
 
-Prereq: `make db-up` (Docker running) — host :8001 maps to the Chroma container.
+Prereq: the throwaway test Chroma on :8002 (`make chroma-test-up`; `make check` does it). Never the dev Chroma.
 These tests hit the real Chroma API; Chroma is not mocked here by design, but the
 embedding vectors are synthetic (no Ollama/LLM calls).
 """

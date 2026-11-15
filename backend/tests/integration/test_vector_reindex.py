@@ -229,3 +229,78 @@ async def test_manage_cli_commands(
         assert await asyncio.to_thread(manage.main, ["rebuild-index"]) == 0
         assert "index rebuilt" in capsys.readouterr().out
     await engine.dispose()
+
+
+# ── Chroma: in-place rewrite vs drop/recreate (ticket 51) ─────────────────────────────────
+class NewModelEmbedder(HashEmbedder):
+    """Same dimension, different vectors: 'the embedding model changed'."""
+
+    @staticmethod
+    def vec(text: str) -> list[float]:
+        a, b, c = HashEmbedder.vec(text)
+        return [c, a, b]
+
+
+def _collection_id(store: Any) -> str:
+    return str(store._client.get_collection(name=store._collection.name).id)
+
+
+async def test_chroma_reindex_without_drift_rewrites_in_place_and_drops_stale_ids(
+    db_session: AsyncSession, tmp_path: Path, isolated_db_url: str
+) -> None:
+    with real_store("chroma", isolated_db_url) as chroma:
+        d1 = await ingest(db_session, tmp_path, chroma, make_text(1500, seed=21), "a.txt")
+        rows = await ops.list_chunks_by_document(d1, session=db_session)
+        expected_ids = {str(c.metadata_["vector_id"]) for c in rows}
+        chroma.add_chunks("ghost", [{"text": "stale vector of a deleted document"}], [[0.3, 0.2, 0.1]])
+        assert len(chroma.all_ids()) == len(expected_ids) + 1  # type: ignore[attr-defined]
+        before = _collection_id(chroma)
+
+        result = await reindex_all(db_session, embedder=NewModelEmbedder(), store=chroma)
+
+        assert _collection_id(chroma) == before  # not dropped: Chroma would keep the old index in memory
+        assert result.vectors == len(expected_ids)
+        assert set(chroma.all_ids()) == expected_ids  # type: ignore[attr-defined]  # the ghost is gone
+        chroma.verify()
+        # identical outcome to a rebuild: every vector now comes from the new model
+        text = rows[0].text
+        top = chroma.similarity_search(NewModelEmbedder.vec(text), 1)[0]
+        assert top["text"] == text and top["score"] == pytest.approx(0.0, abs=1e-5)
+        assert {"doc_id", "index", "content_hash", "vector_id"} <= set(top["metadata"])
+
+
+async def test_chroma_reindex_with_settings_drift_still_drops_and_recreates(
+    db_session: AsyncSession, tmp_path: Path, isolated_db_url: str
+) -> None:
+    from app.services.vectorstore import ChromaStore
+
+    with real_store("chroma", isolated_db_url, metric="cosine") as cos:
+        await ingest(db_session, tmp_path, cos, make_text(900, seed=22), "b.txt")
+        before = _collection_id(cos)
+        l2 = ChromaStore(collection_name=cos._collection.name, vector_settings=settings_for("chroma", "l2"))  # type: ignore[attr-defined]
+        with pytest.raises(VectorStoreMismatchError, match="VECTOR_METRIC"):
+            l2.verify()
+
+        await reindex_all(db_session, embedder=HashEmbedder(), store=l2)
+
+        assert _collection_id(l2) != before  # drift: the new settings only apply to a new collection
+        l2.verify()
+        assert l2.describe()["stored"]["metric"] == "l2" and l2.describe()["count"] > 3
+
+
+async def test_chroma_reindex_to_another_dimension_falls_back_to_recreate(
+    db_session: AsyncSession, tmp_path: Path, isolated_db_url: str
+) -> None:
+    class Wide(HashEmbedder):
+        @staticmethod
+        def vec(text: str) -> list[float]:
+            return [*HashEmbedder.vec(text), 0.5, 0.25]
+
+    # dimension not pinned by the settings, so verify() cannot see the change: the upsert reports it
+    with real_store("chroma", isolated_db_url, dimension=None) as small:
+        await ingest(db_session, tmp_path, small, make_text(900, seed=23), "c.txt")
+        before = _collection_id(small)
+        await reindex_all(db_session, embedder=Wide(), store=small)
+        assert _collection_id(small) != before
+        assert small.stored_settings()["dimension"] == 5  # type: ignore[attr-defined]
+        assert small.describe()["count"] > 3
