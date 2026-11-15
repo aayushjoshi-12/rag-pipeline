@@ -86,14 +86,18 @@ describe('streaming chat', () => {
 
     await s.emit(sources)
     const section = await screen.findByLabelText('answer')
-    expect(within(section).getByText(/zephyr\.md · chunk 3/)).toBeInTheDocument() // sources first
+    expect(within(section).getByRole('region', { name: 'zephyr.md' })).toBeInTheDocument() // sources first
     expect(section).toHaveAttribute('aria-busy', 'true')
     expect(screen.queryByText(/Searching documents/)).toBeNull()
 
     await s.emit(token('About '))
     expect(within(section).getByText(/About/)).toBeInTheDocument()
     await s.emit(token('14 hours [1].'))
-    expect(section.querySelector('.answer')).toHaveTextContent('About 14 hours [1].')
+    // the marker is a citation button while the answer is still streaming
+    expect(section.querySelector('.answer')).toHaveTextContent('About 14 hours 1.')
+    expect(
+      within(section).getByRole('button', { name: /^Source 1: zephyr\.md/ }),
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Stop' })).toBeInTheDocument()
 
     await s.emit(done('About 14 hours [1].'))
@@ -151,7 +155,10 @@ describe('streaming chat', () => {
     renderAt('/chat')
     await ask()
     const section = await screen.findByLabelText('answer')
-    expect(within(section).getByText('Plain answer [1]')).toBeInTheDocument()
+    expect(within(section).getByText(/Plain answer/)).toBeInTheDocument()
+    expect(
+      within(section).getByRole('button', { name: /^Source 1: zephyr\.md, chunk 3/ }),
+    ).toBeInTheDocument()
     expect(m.chat).toHaveBeenCalledWith({ question: 'How long is the battery?' })
   })
 

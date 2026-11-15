@@ -62,6 +62,8 @@ export interface ChatRequest {
   question: string
   document_ids?: string[]
   top_k?: number
+  /** Per-request override: context chunks around each hit (0-5); omit to use the server default. */
+  neighbors?: number
   /** Per-request override; omit to use the server default. */
   mode?: RetrievalMode
   /** Per-request override, only meaningful for hybrid; omit to use the server default. */

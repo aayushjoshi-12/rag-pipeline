@@ -33,6 +33,17 @@ describe('requestOverrides', () => {
   })
 })
 
+describe('requestOverrides: top_k and neighbors', () => {
+  it('sends valid numbers (0 neighbours included) and drops invalid ones', () => {
+    expect(requestOverrides({ mode: '', fusion: '', topK: '8', neighbors: '0' })).toEqual({
+      top_k: 8,
+      neighbors: 0,
+    })
+    expect(requestOverrides({ mode: '', fusion: '', topK: '51', neighbors: '6' })).toEqual({})
+    expect(requestOverrides({ mode: '', fusion: '', topK: '0', neighbors: '-1' })).toEqual({})
+  })
+})
+
 describe('scoreLabel for context chunks', () => {
   it('never prints a number for an unscored chunk', () => {
     const l = scoreLabel({ score: null, score_kind: 'rrf' })
@@ -67,7 +78,11 @@ describe('scoreLabel', () => {
 describe('preferences storage', () => {
   it('round-trips and summarises', () => {
     savePrefs({ mode: 'hybrid', fusion: 'rrf' })
-    expect(loadPrefs()).toEqual({ mode: 'hybrid', fusion: 'rrf' })
+    expect(loadPrefs()).toEqual({ mode: 'hybrid', fusion: 'rrf', topK: '', neighbors: '' })
+    savePrefs({ mode: '', fusion: '', topK: '8', neighbors: '0' })
+    expect(loadPrefs()).toMatchObject({ topK: '8', neighbors: '0' })
+    window.localStorage.setItem(STORAGE_KEY, '{"mode":"","fusion":"","topK":"99","neighbors":"x"}')
+    expect(loadPrefs()).toEqual(DEFAULT_PREFS) // out of range / garbage fall back to the default
     expect(prefsSummary({ mode: 'hybrid', fusion: 'rrf' })).toBe('Hybrid · RRF')
     expect(prefsSummary(DEFAULT_PREFS)).toBe('Server default')
     expect(prefsSummary({ mode: 'keyword', fusion: '' })).toBe('Keyword')

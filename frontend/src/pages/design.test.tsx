@@ -54,7 +54,8 @@ describe('chat conversation layout', () => {
     expect(items).toHaveLength(2)
     expect(within(items[0]!).queryByText('context')).not.toBeInTheDocument()
     expect(within(items[1]!).getByText('context')).toBeInTheDocument()
-    expect(within(items[0]!).getByText('distance 0.50')).toBeInTheDocument()
+    expect(within(items[0]!).getByRole('img', { name: /^Relevance: high/ })).toBeInTheDocument()
+    expect(within(items[1]!).queryByRole('img', { name: /Relevance/ })).toBeNull()
   })
 
   it('shows the question as a user message and says when nothing relevant was found', async () => {
@@ -66,13 +67,20 @@ describe('chat conversation layout', () => {
     expect(screen.getByText('unknown topic')).toBeInTheDocument()
   })
 
-  it('long passages can be expanded and collapsed', async () => {
-    m.chat.mockResolvedValue({ answer: 'ok', sources: [src({ text: 'x'.repeat(400) })] })
+  it('passages start collapsed to one line and expand to the full chunk', async () => {
+    const long = 'x'.repeat(400)
+    m.chat.mockResolvedValue({ answer: 'ok', sources: [src({ text: long })] })
     renderAt('/chat')
     await userEvent.type(screen.getByLabelText('Question'), 'q')
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
-    await userEvent.click(await screen.findByRole('button', { name: 'Show more' }))
-    expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument()
+    const toggle = await screen.findByRole('button', { name: /^Source 1:/ })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText(long)).toBeNull() // only a windowed one-line snippet
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText(long)).toBeInTheDocument()
+    await userEvent.click(toggle)
+    expect(screen.queryByText(long)).toBeNull()
   })
 
   it('Enter sends, Shift+Enter does not', async () => {

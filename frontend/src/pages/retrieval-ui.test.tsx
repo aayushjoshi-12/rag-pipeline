@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '../api/client'
 import { STORAGE_KEY } from '../retrieval'
-import { renderAt, resetStore } from '../test/helpers'
+import { renderAt, resetStore, signInAs } from '../test/helpers'
 
 vi.mock('../config', () => ({ POLL_MS: 10 }))
 vi.mock('../api/client', () => ({
@@ -35,7 +35,7 @@ const ask = async (q = 'q') => {
   await userEvent.type(screen.getByLabelText('Question'), q)
   await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
 }
-const openOptions = () => userEvent.click(screen.getByRole('button', { name: /Retrieval options/ }))
+const openOptions = () => userEvent.click(screen.getByRole('button', { name: /Advanced/ }))
 
 describe('retrieval options in the composer', () => {
   it('sends neither mode nor fusion when left on Server default', async () => {
@@ -52,21 +52,62 @@ describe('retrieval options in the composer', () => {
     await waitFor(() => expect(m.chat).toHaveBeenCalledWith({ question: 'q', mode: 'keyword' }))
   })
 
-  it('disables Fusion unless the mode is hybrid and sends it for hybrid', async () => {
+  it('shows Fusion only for hybrid and sends it', async () => {
     renderAt('/chat')
     await openOptions()
-    const fusion = screen.getByLabelText('Fusion')
-    expect(fusion).toBeDisabled() // server default
+    expect(screen.queryByLabelText('Fusion')).toBeNull() // server default
     for (const mode of ['semantic', 'keyword']) {
       await userEvent.selectOptions(screen.getByLabelText('Retrieval mode'), mode)
-      expect(fusion).toBeDisabled()
+      expect(screen.queryByLabelText('Fusion')).toBeNull()
     }
     await userEvent.selectOptions(screen.getByLabelText('Retrieval mode'), 'hybrid')
-    expect(fusion).toBeEnabled()
-    await userEvent.selectOptions(fusion, 'weighted')
+    await userEvent.selectOptions(screen.getByLabelText('Fusion'), 'weighted')
     await ask()
     await waitFor(() =>
       expect(m.chat).toHaveBeenCalledWith({ question: 'q', mode: 'hybrid', fusion: 'weighted' }),
+    )
+  })
+
+  it('sends top_k and neighbors (0 included) and flags the active override', async () => {
+    renderAt('/chat')
+    expect(screen.queryByTestId('retrieval-summary')).toBeNull() // nothing overridden, no indicator
+    await openOptions()
+    await userEvent.type(screen.getByLabelText(/Passages/), '8')
+    await userEvent.selectOptions(screen.getByLabelText('Neighbours'), '0')
+    expect(screen.getByTestId('retrieval-summary')).toHaveTextContent('top 8 · ±0 neighbours')
+    await ask()
+    await waitFor(() =>
+      expect(m.chat).toHaveBeenCalledWith({ question: 'q', top_k: 8, neighbors: 0 }),
+    )
+  })
+
+  it('Reset clears overrides; Esc closes the popover and returns focus', async () => {
+    renderAt('/chat')
+    await openOptions()
+    await userEvent.selectOptions(screen.getByLabelText('Retrieval mode'), 'keyword')
+    expect(screen.getByTestId('retrieval-summary')).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }))
+    expect(screen.queryByTestId('retrieval-summary')).toBeNull()
+    await userEvent.keyboard('{Escape}')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(screen.getByRole('button', { name: /Advanced/ })).toHaveFocus()
+  })
+
+  it('links to Admin > Settings only for users who can read settings', async () => {
+    signInAs(['chat:use', 'documents:read'])
+    renderAt('/chat')
+    await openOptions()
+    expect(screen.queryByRole('link', { name: /Admin > Settings/ })).toBeNull()
+    expect(screen.getByText(/Defaults are set in/)).toHaveTextContent('Admin > Settings')
+  })
+
+  it('links to Admin > Settings for users who can read settings', async () => {
+    signInAs(['chat:use', 'settings:read'])
+    renderAt('/chat')
+    await openOptions()
+    expect(screen.getByRole('link', { name: /Admin > Settings/ })).toHaveAttribute(
+      'href',
+      '/settings',
     )
   })
 
@@ -87,6 +128,8 @@ describe('retrieval options in the composer', () => {
     expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? '{}')).toEqual({
       mode: 'hybrid',
       fusion: 'rrf',
+      topK: '',
+      neighbors: '',
     })
     first.unmount()
     renderAt('/chat')
@@ -116,7 +159,7 @@ describe('retrieval options in the composer', () => {
     renderAt('/chat')
     expect(screen.getByLabelText('Question')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Ask' })).toBeInTheDocument()
-    expect(screen.getByText('Search in (none selected = all documents)')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: /Search in/ })).toBeInTheDocument()
   })
 
   it.each([
@@ -130,16 +173,19 @@ describe('retrieval options in the composer', () => {
   })
 })
 
-describe('source cards', () => {
+describe('source rows', () => {
   const answerWith = async (sources: Record<string, unknown>[]) => {
     m.chat.mockResolvedValue({ answer: 'ok', sources: sources.map((s) => src(s)) as never })
     renderAt('/chat')
     await ask()
     const section = await screen.findByLabelText('answer')
+    for (const b of within(section).getAllByRole('button', { name: /^Source \d+:/ })) {
+      await userEvent.click(b)
+    }
     return within(section).getAllByRole('listitem')
   }
 
-  it('labels each score by its kind', async () => {
+  it('labels each score by its kind, inside the details disclosure', async () => {
     const items = await answerWith([
       { score: 0.42, score_kind: 'distance' },
       { score: 11.84, score_kind: 'bm25' },
@@ -147,7 +193,7 @@ describe('source cards', () => {
       { score: 0.5 },
       { score: 0.7, score_kind: 'mystery' },
     ])
-    expect(within(items[0]!).getByText('distance 0.42')).toBeInTheDocument()
+    expect(within(items[0]!).getByText('distance 0.42').closest('details')).not.toBeNull()
     expect(within(items[1]!).getByText('BM25 11.8')).toBeInTheDocument()
     expect(within(items[1]!).getByTitle(/higher is better/)).toBeInTheDocument()
     expect(within(items[2]!).getByText('RRF 0.031')).toBeInTheDocument()
@@ -156,7 +202,7 @@ describe('source cards', () => {
     expect(within(items[0]!).getByTitle(/lower is closer/)).toBeInTheDocument()
   })
 
-  it('shows rank chips for hybrid results only where a rank exists', async () => {
+  it('shows rank rows for hybrid results only where a rank exists', async () => {
     const items = await answerWith([
       { score: 0.031, score_kind: 'rrf', semantic_rank: 2, keyword_rank: 1 },
       { score: 0.016, score_kind: 'rrf', semantic_rank: null, keyword_rank: 7 },

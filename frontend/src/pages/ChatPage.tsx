@@ -1,74 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AnswerText } from '../components/AnswerText'
+import { DocumentPicker } from '../components/DocumentPicker'
 import { Icon } from '../components/Icon'
 import { RetrievalOptions } from '../components/RetrievalOptions'
+import { SourceList } from '../components/SourceList'
 import { Alert, EmptyState, PageHeader } from '../components/ui'
-import {
-  loadPrefs,
-  requestOverrides,
-  savePrefs,
-  scoreLabel,
-  type RetrievalPrefs,
-} from '../retrieval'
+import { queryTerms, termRegExp } from '../citations'
+import { loadPrefs, requestOverrides, savePrefs, type RetrievalPrefs } from '../retrieval'
 import { useStore } from '../store'
-import type { Source } from '../types'
-
-function SourceCard({ source, n }: { source: Source; n: number }) {
-  const [open, setOpen] = useState(false)
-  const long = source.text.length > 240
-  const context = source.is_hit === false
-  const label = scoreLabel(source)
-  return (
-    <li className={context ? 'source is-context' : 'source'}>
-      <span className="source-n" aria-hidden="true">
-        {n}
-      </span>
-      <div className="source-main">
-        <div className="source-head">
-          <strong className="truncate" title={source.filename}>
-            {source.filename} · chunk {source.chunk_index}
-          </strong>
-          {!context && (
-            <span className="chip chip-static num" title={label.title}>
-              {label.text}
-            </span>
-          )}
-          {source.semantic_rank != null && (
-            <span className="chip chip-static num" title="Rank in the semantic (meaning) results">
-              semantic #{source.semantic_rank}
-            </span>
-          )}
-          {source.keyword_rank != null && (
-            <span
-              className="chip chip-static num"
-              title="Rank in the keyword (exact words) results"
-            >
-              keyword #{source.keyword_rank}
-            </span>
-          )}
-          {context && (
-            <span
-              className="chip chip-static"
-              title="Neighbouring chunk added for context (not scored)"
-            >
-              context
-            </span>
-          )}
-        </div>
-        <p
-          className={open ? 'source-text' : 'source-text clamp'}
-          title={`doc ${source.document_id}`}
-        >
-          {source.text}
-        </p>
-        {long && (
-          <button type="button" className="linklike small" onClick={() => setOpen((v) => !v)}>
-            {open ? 'Show less' : 'Show more'}
-          </button>
-        )}
-      </div>
-    </li>
-  )
-}
+import { useCan } from '../store/auth'
 
 export default function ChatPage() {
   const { documents, refreshDocuments, chat, ask, stopChat } = useStore()
@@ -84,12 +24,31 @@ export default function ChatPage() {
     void refreshDocuments()
   }, [refreshDocuments])
 
-  const ready = documents.filter((d) => d.status === 'ready')
-  const toggle = (id: string) =>
-    setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]))
+  const canOpenDocs = useCan('documents:read')
+  const [flash, setFlash] = useState<number | null>(null)
+  const flashTimer = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(flashTimer.current), [])
+  const re = useMemo(() => termRegExp(queryTerms(chat.question)), [chat.question])
+  /** Scroll to the source row, move focus there and flash it. */
+  const jump = useCallback((n: number) => {
+    const el = document.getElementById(`src-${n}`)
+    if (!el) return
+    const calm = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    el.scrollIntoView?.({ behavior: calm ? 'auto' : 'smooth', block: 'center' })
+    el.focus({ preventScroll: true })
+    setFlash(n)
+    window.clearTimeout(flashTimer.current)
+    flashTimer.current = window.setTimeout(() => setFlash(null), 2200)
+  }, [])
+
   const submit = () => {
     if (question.trim() && !chat.pending) {
-      void ask(question.trim(), selected, requestOverrides(prefs))
+      const ids = new Set(documents.filter((d) => d.status === 'ready').map((d) => d.id))
+      void ask(
+        question.trim(),
+        selected.filter((id) => ids.has(id)),
+        requestOverrides(prefs),
+      )
       setQuestion('')
     }
   }
@@ -106,8 +65,8 @@ export default function ChatPage() {
       <div className="conversation" aria-live="polite">
         {!started && (
           <EmptyState icon="sparkles" title="Ask your documents anything">
-            Pick documents below to narrow the search, or leave them all unselected to search the
-            whole library.
+            Pick documents below to narrow the search, or leave &ldquo;All documents&rdquo; to
+            search the whole library.
           </EmptyState>
         )}
         {started && (
@@ -150,7 +109,12 @@ export default function ChatPage() {
                 Answer
               </div>
               <div className={chat.streaming ? 'answer is-streaming' : 'answer'}>
-                {chat.response.answer}
+                <AnswerText
+                  text={chat.response.answer}
+                  sources={chat.response.sources}
+                  re={re}
+                  onCite={jump}
+                />
                 {chat.streaming && chat.response.answer === '' && (
                   <span className="typing" aria-label="Writing the answer">
                     <i />
@@ -177,15 +141,13 @@ export default function ChatPage() {
                   <h2 className="sources-title">
                     Sources <span className="muted num">{chat.response.sources.length}</span>
                   </h2>
-                  <ol className="sources">
-                    {chat.response.sources.map((s, i) => (
-                      <SourceCard
-                        key={`${s.document_id}-${s.chunk_index}-${i}`}
-                        source={s}
-                        n={i + 1}
-                      />
-                    ))}
-                  </ol>
+                  <SourceList
+                    sources={chat.response.sources}
+                    re={re}
+                    flash={flash}
+                    canOpen={canOpenDocs}
+                    onJump={jump}
+                  />
                 </>
               )}
             </section>
@@ -205,26 +167,10 @@ export default function ChatPage() {
           submit()
         }}
       >
-        <fieldset className="scope">
-          <legend>Search in (none selected = all documents)</legend>
-          {ready.length === 0 && <span className="muted small">No ready documents.</span>}
-          <div className="chips">
-            {ready.map((d) => (
-              <label key={d.id} className={selected.includes(d.id) ? 'chip is-on' : 'chip'}>
-                <input
-                  type="checkbox"
-                  checked={selected.includes(d.id)}
-                  onChange={() => toggle(d.id)}
-                />
-                <Icon name={selected.includes(d.id) ? 'check' : 'file'} size={13} />
-                <span className="truncate" title={d.filename}>
-                  {d.filename}
-                </span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <RetrievalOptions value={prefs} onChange={changePrefs} />
+        <div className="composer-tools">
+          <DocumentPicker documents={documents} selected={selected} onChange={setSelected} />
+          <RetrievalOptions value={prefs} onChange={changePrefs} />
+        </div>
         <div className="composer-row">
           <label className="sr-only" htmlFor="chat-question">
             Question

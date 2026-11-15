@@ -205,8 +205,11 @@ describe('Chat page', () => {
     await userEvent.type(screen.getByLabelText('Question'), 'How long is the battery?')
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
     const section = await screen.findByLabelText('answer')
-    expect(within(section).getByText(/14 hours \[1\]/)).toBeInTheDocument()
-    expect(within(section).getByText(/zephyr\.md · chunk 3/)).toBeInTheDocument()
+    expect(within(section).getByText(/The battery lasts 14 hours/)).toBeInTheDocument()
+    expect(
+      within(section).getByRole('button', { name: /^Source 1: zephyr\.md, chunk 3/ }),
+    ).toBeInTheDocument()
+    expect(within(section).getByRole('region', { name: 'zephyr.md' })).toBeInTheDocument()
     expect(m.chat).toHaveBeenCalledWith({ question: 'How long is the battery?' })
   })
 
@@ -217,8 +220,9 @@ describe('Chat page', () => {
     ])
     m.chat.mockResolvedValue(answer)
     renderAt('/chat')
-    await userEvent.click(await screen.findByLabelText('zephyr.md'))
-    expect(screen.queryByLabelText('wip.md')).toBeNull() // only ready docs are selectable
+    await userEvent.click(await screen.findByRole('combobox', { name: /Search in/ }))
+    await userEvent.click(await screen.findByRole('option', { name: /zephyr\.md/ }))
+    expect(screen.queryByRole('option', { name: /wip\.md/ })).toBeNull() // only ready docs are selectable
     await userEvent.type(screen.getByLabelText('Question'), 'q')
     await userEvent.click(screen.getByRole('button', { name: 'Ask' }))
     await waitFor(() =>

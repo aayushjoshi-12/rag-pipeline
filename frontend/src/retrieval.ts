@@ -4,9 +4,16 @@ import type { ChatRequest, RetrievalFusion, RetrievalMode, Source } from './type
 export interface RetrievalPrefs {
   mode: '' | RetrievalMode
   fusion: '' | RetrievalFusion
+  /** Passages to retrieve (1-50); '' = server default. Kept as text so the input can be empty. */
+  topK?: string
+  /** Neighbouring chunks added around each hit (0-5); '' = server default. */
+  neighbors?: string
 }
 
-export const DEFAULT_PREFS: RetrievalPrefs = { mode: '', fusion: '' }
+export const TOP_K_MAX = 50
+export const NEIGHBORS_MAX = 5
+
+export const DEFAULT_PREFS: RetrievalPrefs = { mode: '', fusion: '', topK: '', neighbors: '' }
 export const STORAGE_KEY = 'rag.retrieval'
 
 const MODES: readonly string[] = ['', 'semantic', 'keyword', 'hybrid']
@@ -24,6 +31,15 @@ export const FUSION_HELP: Record<RetrievalPrefs['fusion'], string> = {
   weighted: 'Weighted blend of normalised scores; lets one retriever dominate.',
 }
 
+/** A whole number within [min, max] as text, otherwise '' (= server default). */
+export function intOrEmpty(v: unknown, min: number, max: number): string {
+  if (typeof v !== 'string' && typeof v !== 'number') return ''
+  const s = String(v).trim()
+  if (!/^\d{1,3}$/.test(s)) return ''
+  const n = Number(s)
+  return n >= min && n <= max ? String(n) : ''
+}
+
 export function loadPrefs(): RetrievalPrefs {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
@@ -31,7 +47,12 @@ export function loadPrefs(): RetrievalPrefs {
     const p = JSON.parse(raw) as Partial<Record<keyof RetrievalPrefs, unknown>>
     const mode = typeof p.mode === 'string' && MODES.includes(p.mode) ? p.mode : ''
     const fusion = typeof p.fusion === 'string' && FUSIONS.includes(p.fusion) ? p.fusion : ''
-    return { mode, fusion } as RetrievalPrefs
+    return {
+      mode,
+      fusion,
+      topK: intOrEmpty(p.topK, 1, TOP_K_MAX),
+      neighbors: intOrEmpty(p.neighbors, 0, NEIGHBORS_MAX),
+    } as RetrievalPrefs
   } catch {
     return DEFAULT_PREFS // storage unavailable or corrupt: behave as if nothing was saved
   }
@@ -46,17 +67,35 @@ export function savePrefs(prefs: RetrievalPrefs): void {
 }
 
 /** Only the fields that differ from "Server default"; fusion only applies to hybrid. */
-export function requestOverrides(prefs: RetrievalPrefs): Pick<ChatRequest, 'mode' | 'fusion'> {
+export type RequestOverrides = Pick<ChatRequest, 'mode' | 'fusion' | 'top_k' | 'neighbors'>
+
+export function requestOverrides(prefs: RetrievalPrefs): RequestOverrides {
+  const topK = intOrEmpty(prefs.topK, 1, TOP_K_MAX)
+  const neighbors = intOrEmpty(prefs.neighbors, 0, NEIGHBORS_MAX)
   return {
     ...(prefs.mode ? { mode: prefs.mode } : {}),
     ...(prefs.mode === 'hybrid' && prefs.fusion ? { fusion: prefs.fusion } : {}),
+    ...(topK ? { top_k: Number(topK) } : {}),
+    ...(neighbors ? { neighbors: Number(neighbors) } : {}),
   }
 }
 
+/** What differs from the server defaults, as short parts ("Hybrid · RRF", "top 8", "±2"). */
+export function overrideParts(prefs: RetrievalPrefs): string[] {
+  const o = requestOverrides(prefs)
+  const parts: string[] = []
+  if (o.mode) {
+    const name = o.mode[0]!.toUpperCase() + o.mode.slice(1)
+    parts.push(o.fusion ? `${name} · ${o.fusion.toUpperCase()}` : name)
+  }
+  if (o.top_k !== undefined) parts.push(`top ${o.top_k}`)
+  if (o.neighbors !== undefined) parts.push(`±${o.neighbors} neighbours`)
+  return parts
+}
+
 export function prefsSummary(prefs: RetrievalPrefs): string {
-  if (!prefs.mode) return 'Server default'
-  const name = prefs.mode[0]!.toUpperCase() + prefs.mode.slice(1)
-  return prefs.mode === 'hybrid' && prefs.fusion ? `${name} · ${prefs.fusion.toUpperCase()}` : name
+  const parts = overrideParts(prefs)
+  return parts.length ? parts.join(' · ') : 'Server default'
 }
 
 export interface ScoreLabel {

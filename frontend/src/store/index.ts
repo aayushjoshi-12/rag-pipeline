@@ -31,7 +31,7 @@ interface AppState {
   ask: (
     question: string,
     documentIds?: string[],
-    retrieval?: Pick<ChatRequest, 'mode' | 'fusion'>,
+    retrieval?: Pick<ChatRequest, 'mode' | 'fusion' | 'top_k' | 'neighbors'>,
   ) => Promise<void>
   /** Abort the running chat request (the server then cancels the upstream LLM call). */
   stopChat: () => void
