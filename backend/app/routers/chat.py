@@ -5,7 +5,7 @@ import uuid
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -21,6 +21,7 @@ from app.routers.deps import (
 from app.schema.chat import ChatRequest, ChatResponse, ChunkRef, SourceOut
 from app.services import observability, traces
 from app.services.auth.permissions import Permission
+from app.services.cache import CacheCall, get_cache, wants_bypass
 from app.services.embeddings import Embedder
 from app.services.llm import LLM, LLMConfigError, LLMRequestError, LLMUnavailableError
 from app.services.qa import answer_question
@@ -35,6 +36,8 @@ router = APIRouter()
 @router.post("/chat", response_model=ChatResponse)
 async def chat(
     req: ChatRequest,
+    request: Request,
+    response: Response,
     principal: Annotated[Principal, Depends(require(Permission.CHAT_USE))],
     session: Annotated[AsyncSession, Depends(get_session)],
     cfg: Annotated[Settings, Depends(get_settings)],
@@ -46,9 +49,24 @@ async def chat(
     neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
     options = RetrievalOptions.from_settings(cfg, mode=req.mode, fusion=req.fusion)
     started = time.perf_counter()
-    outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None, "prompt": None, "completion": None, "cost": None, "cited": []}
+    call = CacheCall(
+        get_cache(cfg), bypass=wants_bypass(req.cache, request.headers.get("cache-control"))
+    )
+    outcome: dict[str, Any] = {
+        "status": "error",
+        "error": None,
+        "hits": None,
+        "prompt": None,
+        "completion": None,
+        "cost": None,
+        "cited": [],
+    }
     try:
-        return await _chat(req, top_k, neighbors, options, session, cfg, embedder, store, llm, outcome)
+        out = await _chat(
+            req, top_k, neighbors, options, session, cfg, embedder, store, llm, outcome, call
+        )
+        response.headers.update(call.header("answer"))
+        return out
     except HTTPException as exc:
         outcome["error"] = str(exc.detail)
         raise
@@ -75,6 +93,7 @@ async def chat(
                 "document_filter": len(req.document_ids or []),
                 # ids only (never content): which documents the answer was grounded on
                 "cited_document_ids": outcome["cited"],
+                **({"cache": call.trace_meta("answer")} if call.active else {}),
                 **options.trace_meta(),
             },
         )
@@ -91,6 +110,7 @@ async def _chat(
     store: VectorStore,
     llm: LLM | None,
     outcome: dict[str, Any],
+    call: CacheCall,
 ) -> ChatResponse:
     with (
         log_context(chat_id=uuid.uuid4().hex, question_chars=len(req.question)),
@@ -112,13 +132,14 @@ async def _chat(
             store=store,
             session=session,
             span_prefix="chat",
+            cache=call,
         )
         chunks = retrieval.passages
         outcome["hits"] = len(retrieval.hits)
 
         try:
             with observability.span("chat.answer", sources=len(chunks)):
-                result = await answer_question(req.question, chunks, llm)
+                result = await answer_question(req.question, chunks, llm, cache=call)
         except (LLMUnavailableError, LLMConfigError) as exc:
             logger.warning("llm_unavailable", error=str(exc))
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
@@ -133,9 +154,13 @@ async def _chat(
             cost=result.cost_usd,
             cited=list(dict.fromkeys(str(c.document_id) for c in result.sources if c.is_hit)),
         )
-        root.update(output=observability.maybe_content(result.answer), metadata={"sources": len(result.sources)})
+        root.update(
+            output=observability.maybe_content(result.answer),
+            metadata={"sources": len(result.sources)},
+        )
         logger.info("chat_answered", sources=len(result.sources))
         return ChatResponse(
+            cache=call.result("answer"),
             answer=result.answer,
             sources=[
                 SourceOut(

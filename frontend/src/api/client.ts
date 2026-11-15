@@ -5,6 +5,7 @@ import type {
   ChatRequest,
   ChatResponse,
   Chunk,
+  CacheStats,
   Credits,
   DayUsage,
   Document,
@@ -142,6 +143,7 @@ export const api = {
   usageInsights: (days = 14, kind = '') =>
     request<Insights>(`/usage/insights?days=${days}${kind ? `&kind=${kind}` : ''}`),
   usageCredits: () => request<Credits>('/usage/credits'),
+  cacheStats: (days = 7) => request<CacheStats>(`/cache/stats?days=${days}`),
   listPermissions: () => request<PermissionInfo[]>('/permissions'),
   listUsers: () => request<ManagedUser[]>('/users'),
   createUser: (input: UserCreateInput) =>

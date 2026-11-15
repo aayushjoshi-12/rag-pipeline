@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.enums import JobStatus
 from app.db.models import Chunk, Job
+from app.services import cache
 from app.services.embeddings import Embedder
 from app.services.vectorstore import VectorStore
 
@@ -55,7 +56,9 @@ async def store_status(session: AsyncSession, store: VectorStore) -> dict[str, A
     info["expected_vectors"] = expected
     problems = list(info.get("problems", []))
     if expected > 0 and info.get("count", 0) == 0:
-        problems.append(f"the vector store is empty but the database holds {expected} chunks (store switched or wiped)")
+        problems.append(
+            f"the vector store is empty but the database holds {expected} chunks (store switched or wiped)"
+        )
     info["problems"] = problems
     return info
 
@@ -70,12 +73,20 @@ async def reindex_all(
     started = time.perf_counter()
     if not force:
         running = (
-            await session.execute(select(func.count()).select_from(Job).where(Job.status == JobStatus.RUNNING))
+            await session.execute(
+                select(func.count()).select_from(Job).where(Job.status == JobStatus.RUNNING)
+            )
         ).scalar_one()
         if running:
-            raise ReindexError(f"{running} ingest job(s) are running; wait for them or pass force=True.")
+            raise ReindexError(
+                f"{running} ingest job(s) are running; wait for them or pass force=True."
+            )
 
-    rows = (await session.execute(select(Chunk).order_by(Chunk.document_id, Chunk.index))).scalars().all()
+    rows = (
+        (await session.execute(select(Chunk).order_by(Chunk.document_id, Chunk.index)))
+        .scalars()
+        .all()
+    )
     by_doc: dict[uuid.UUID, list[Chunk]] = {}
     for r in rows:
         by_doc.setdefault(r.document_id, []).append(r)
@@ -95,7 +106,9 @@ async def reindex_all(
                 if vid in seen:
                     continue
                 seen.add(vid)
-                items.append({"id": vid, "text": c.text, "metadata": {**dict(c.metadata_), "index": c.index}})
+                items.append(
+                    {"id": vid, "text": c.text, "metadata": {**dict(c.metadata_), "index": c.index}}
+                )
             for i in range(0, len(items), _EMBED_BATCH):
                 batch = items[i : i + _EMBED_BATCH]
                 vecs = await asyncio.to_thread(embedder.embed_documents, [b["text"] for b in batch])
@@ -104,10 +117,21 @@ async def reindex_all(
     finally:
         if had_flag:
             setattr(store, "defer_index_build", False)  # noqa: B010 - see above
+        await (
+            cache.abump_index_version()
+        )  # even a failed/partial reindex changed what is searchable
     rebuild = getattr(store, "rebuild_index", None)
     if callable(rebuild):
         await asyncio.to_thread(rebuild)  # ivfflat: train the centroids on the full data set
     await asyncio.to_thread(store.verify)
-    result = ReindexResult(documents=len(by_doc), vectors=vectors, seconds=time.perf_counter() - started)
-    logger.info("reindex_done", documents=result.documents, vectors=result.vectors, seconds=round(result.seconds, 1))
+    await cache.abump_index_version()  # after the final index build
+    result = ReindexResult(
+        documents=len(by_doc), vectors=vectors, seconds=time.perf_counter() - started
+    )
+    logger.info(
+        "reindex_done",
+        documents=result.documents,
+        vectors=result.vectors,
+        seconds=round(result.seconds, 1),
+    )
     return result

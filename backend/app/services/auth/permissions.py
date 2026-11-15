@@ -20,6 +20,7 @@ class Permission(StrEnum):
     USERS_MANAGE = "users:manage"
     ROLES_MANAGE = "roles:manage"
     APIKEYS_MANAGE = "apikeys:manage"
+    CACHE_MANAGE = "cache:manage"
 
 
 DESCRIPTIONS: dict[Permission, str] = {
@@ -33,6 +34,7 @@ DESCRIPTIONS: dict[Permission, str] = {
     Permission.USERS_MANAGE: "Create, edit and deactivate users",
     Permission.ROLES_MANAGE: "Create, edit and delete roles",
     Permission.APIKEYS_MANAGE: "Create, list and revoke API keys",
+    Permission.CACHE_MANAGE: "Purge the query cache",
 }
 
 ADMIN_ROLE = "admin"
@@ -57,7 +59,12 @@ BUILTIN_ROLES: dict[str, tuple[str, frozenset[Permission]]] = {
     VIEWER_ROLE: (
         "Read documents and chat",
         frozenset(
-            {Permission.DOCUMENTS_READ, Permission.JOBS_READ, Permission.CHAT_USE, Permission.SEARCH_USE}
+            {
+                Permission.DOCUMENTS_READ,
+                Permission.JOBS_READ,
+                Permission.CHAT_USE,
+                Permission.SEARCH_USE,
+            }
         ),
     ),
 }

@@ -19,6 +19,9 @@ import pytest
 # "no real API calls in tests" depend on whoever runs them. Set before app.config is imported,
 # because Settings captures its env-file list when the class is defined.
 os.environ["RAG_ENV_FILE"] = os.devnull
+# The query cache lives in a shared Redis: suites that do not test it must not read or write it.
+# Cache tests opt in with an explicit ``Settings(cache_enabled=True, cache_redis_url=<db 13>)``.
+os.environ["CACHE_ENABLED"] = "false"
 
 from app.config import Settings
 from sqlalchemy.engine import make_url
@@ -157,7 +160,9 @@ def s3_bucket() -> Iterator[str]:
         aws_access_key_id=S3_EMULATOR_KEY,
         aws_secret_access_key=S3_EMULATOR_SECRET,
         region_name="us-east-1",
-        config=Config(s3={"addressing_style": "path"}, connect_timeout=2, retries={"max_attempts": 1}),
+        config=Config(
+            s3={"addressing_style": "path"}, connect_timeout=2, retries={"max_attempts": 1}
+        ),
     )
     name = f"rag-test-{uuid.uuid4().hex[:12]}"
     try:
@@ -194,3 +199,13 @@ def s3_settings(bucket: str, **kw: Any) -> Settings:
         auth_enabled=False,
         **kw,
     )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_chroma_clients() -> Iterator[None]:
+    """The process-wide Chroma client cache must not carry a client (or a test's fake) across tests."""
+    from app.services import vectorstore
+
+    vectorstore._chroma_clients.clear()
+    yield
+    vectorstore._chroma_clients.clear()

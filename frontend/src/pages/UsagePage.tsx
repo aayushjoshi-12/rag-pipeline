@@ -5,6 +5,7 @@ import { compact, fmtMs, fmtUsd } from '../components/charts/format'
 import { Alert, Kpi, PageHeader, TabPanel, Tabs } from '../components/ui'
 import type { Credits, DayUsage, Insights } from '../types'
 import { chats, totalCost, totalUnpriced } from './usage/model'
+import { CachePanel } from './usage/CachePanel'
 import { CostPanel, IngestPanel, PerformancePanel, RagPanel } from './usage/panels'
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -14,6 +15,7 @@ const TABS = [
   { id: 'performance', label: 'Performance' },
   { id: 'rag', label: 'RAG health' },
   { id: 'ingest', label: 'Ingest' },
+  { id: 'cache', label: 'Cache' },
 ]
 
 export default function UsagePage() {
@@ -172,6 +174,7 @@ export default function UsagePage() {
             {tab === 'performance' && <PerformancePanel {...panelProps} />}
             {tab === 'rag' && <RagPanel {...panelProps} />}
             {tab === 'ingest' && <IngestPanel {...panelProps} />}
+            {tab === 'cache' && <CachePanel days={days} />}
           </TabPanel>
         </>
       )}

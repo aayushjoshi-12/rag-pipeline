@@ -95,6 +95,9 @@ def rebuild_index() -> str:
         return "nothing to do: this store has no separately built index"
     store.verify()  # creates the table if missing
     rebuild()
+    from app.services.cache import bump_index_version
+
+    bump_index_version()
     return "index rebuilt"
 
 
@@ -113,7 +116,9 @@ def _ensure_bucket(wait: int) -> int:
         except ValueError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        except Exception as exc:  # emulator still starting, or a real failure once the deadline passes
+        except (
+            Exception
+        ) as exc:  # emulator still starting, or a real failure once the deadline passes
             if time.monotonic() >= deadline:
                 print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
                 return 1
@@ -128,12 +133,20 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("vector-status", help="show configured vs stored vector-store settings")
     rx = sub.add_parser("reindex", help="re-embed all stored chunks into a fresh vector store")
     rx.add_argument("--force", action="store_true", help="run even if ingest jobs are running")
-    rx.add_argument("--queue", action="store_true", help="enqueue the Celery task instead of running inline")
+    rx.add_argument(
+        "--queue", action="store_true", help="enqueue the Celery task instead of running inline"
+    )
     sub.add_parser("fts-status", help="show configured vs stored keyword-search configuration")
-    sub.add_parser("rebuild-fts", help="recreate the keyword-search columns/index with RETRIEVAL_FTS_CONFIG")
+    sub.add_parser(
+        "rebuild-fts", help="recreate the keyword-search columns/index with RETRIEVAL_FTS_CONFIG"
+    )
     sub.add_parser("rebuild-index", help="rebuild the pgvector ANN index on the current rows")
-    eb = sub.add_parser("ensure-bucket", help="create S3_BUCKET if it does not exist (local S3 emulators)")
-    eb.add_argument("--wait", type=int, default=0, help="retry for up to N seconds while the store starts")
+    eb = sub.add_parser(
+        "ensure-bucket", help="create S3_BUCKET if it does not exist (local S3 emulators)"
+    )
+    eb.add_argument(
+        "--wait", type=int, default=0, help="retry for up to N seconds while the store starts"
+    )
     args = parser.parse_args(argv)
 
     if args.command == "ensure-bucket":

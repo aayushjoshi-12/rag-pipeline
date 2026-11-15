@@ -13,6 +13,7 @@ from app.config import Settings
 from app.db.engine import async_session, engine
 from app.observability import configure_for_server
 from app.routers import api_keys, auth, chat, documents, health, search, traces
+from app.routers import cache as cache_router
 from app.services import keyword, observability, retriever
 from app.services.auth import accounts
 from app.services.langfuse import configure_from_settings
@@ -28,7 +29,9 @@ async def _seed_auth() -> None:
         logger.warning("AUTH_ENABLED=false: every request is treated as an admin. Dev/demo only.")
         return
     if not settings.secret_key:
-        logger.warning("SECRET_KEY is empty: using an ephemeral signing key; logins reset on restart.")
+        logger.warning(
+            "SECRET_KEY is empty: using an ephemeral signing key; logins reset on restart."
+        )
     try:
         async with async_session() as session:
             created = await accounts.seed(
@@ -88,6 +91,7 @@ app.include_router(api_keys.router)
 app.include_router(documents.router)
 app.include_router(chat.router)
 app.include_router(search.router)
+app.include_router(cache_router.router)
 app.include_router(traces.router)
 
 

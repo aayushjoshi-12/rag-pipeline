@@ -284,3 +284,31 @@ export interface Credits {
   is_free_tier: boolean | null
   fetched_at: number | null
 }
+
+export interface CacheKindStats {
+  requests: number
+  with_cache_info: number
+  hits: number
+  misses: number
+  bypassed: number
+  hit_rate: number | null
+  avg_hit_ms: number | null
+  avg_miss_ms: number | null
+  layers: Record<string, { hit: number; miss: number }>
+  llm_calls_avoided: number
+  embeddings_avoided: number
+  saved_usd: number | null
+}
+
+export interface CacheStats {
+  config: { enabled: boolean; redis?: string; ttl_seconds?: Record<string, number> }
+  process: { enabled: boolean; breaker_open: boolean; last_error: string | null }
+  redis: {
+    reachable: boolean
+    keys: Record<string, number>
+    index_bumps?: number | null
+    used_memory_bytes?: number
+    error?: string
+  }
+  traces: { search: CacheKindStats; chat: CacheKindStats }
+}

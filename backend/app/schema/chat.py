@@ -16,6 +16,8 @@ class ChatRequest(BaseModel):
     mode: Literal["semantic", "keyword", "hybrid"] | None = None
     #: Override RETRIEVAL_FUSION for this request (only used by ``hybrid``; validated in every mode).
     fusion: Literal["rrf", "weighted"] | None = None
+    #: ``false`` bypasses the query cache for this request (no read, no write). Same as ``Cache-Control: no-cache``.
+    cache: bool | None = None
 
 
 class ChunkRef(BaseModel):
@@ -51,3 +53,5 @@ class ChatResponse(BaseModel):
     #: The passages given to the LLM, in prompt order (citation ``[n]`` = position n). Hits keep their
     #: best-first order relative to each other; context chunks sit next to their hit in reading order.
     sources: list[SourceOut]
+    #: Query-cache verdict for this request: hit | miss | bypass | off (also in the ``X-Cache`` header).
+    cache: str | None = None

@@ -23,7 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from collections.abc import Hashable, Sequence
+from collections.abc import Awaitable, Callable, Hashable, Sequence
 from dataclasses import asdict, dataclass, replace
 from typing import Any
 
@@ -85,10 +85,14 @@ class RetrievalOptions:
             ("fusion", self.fusion, FUSION_METHODS),
         ):
             if value not in allowed:
-                raise ValueError(f"Unknown retrieval {name} {value!r}; allowed: {', '.join(allowed)}")
+                raise ValueError(
+                    f"Unknown retrieval {name} {value!r}; allowed: {', '.join(allowed)}"
+                )
 
     @classmethod
-    def from_settings(cls, cfg: Settings, *, mode: str | None = None, fusion: str | None = None) -> RetrievalOptions:
+    def from_settings(
+        cls, cfg: Settings, *, mode: str | None = None, fusion: str | None = None
+    ) -> RetrievalOptions:
         """Deployment settings, with the per-request ``mode`` / ``fusion`` taking precedence when given."""
         return cls(
             mode=mode or cfg.retrieval_mode,
@@ -136,10 +140,22 @@ def _dedupe(results: Sequence[ChunkResult], enabled: bool) -> list[ChunkResult]:
     return out
 
 
+#: Async "embed this query" hook; the query cache wraps the embedder with one (see services/search.py).
+EmbedQuery = Callable[[str], Awaitable[list[float]]]
+
+
 async def _semantic_raw(
-    query: str, fetch: int, embedder: Embedder, store: VectorStore, document_ids: Sequence[uuid.UUID] | None
+    query: str,
+    fetch: int,
+    embedder: Embedder,
+    store: VectorStore,
+    document_ids: Sequence[uuid.UUID] | None,
+    embed_query: EmbedQuery | None = None,
 ) -> list[dict[str, Any]]:
-    vector = await asyncio.to_thread(embedder.embed_query, query)
+    if embed_query is not None:
+        vector = await embed_query(query)
+    else:
+        vector = await asyncio.to_thread(embedder.embed_query, query)
     filters = None
     if document_ids:
         ids = [str(d) for d in document_ids]
@@ -178,7 +194,11 @@ async def _enrich(hits: Sequence[dict[str, Any]], session: AsyncSession) -> list
 
 
 async def _keyword(
-    query: str, fetch: int, opts: RetrievalOptions, session: AsyncSession, document_ids: Sequence[uuid.UUID] | None
+    query: str,
+    fetch: int,
+    opts: RetrievalOptions,
+    session: AsyncSession,
+    document_ids: Sequence[uuid.UUID] | None,
 ) -> list[ChunkResult]:
     hits = await keyword.keyword_search(
         session,
@@ -192,11 +212,17 @@ async def _keyword(
         document_ids=document_ids,
     )
     kind = "bm25" if opts.keyword_method == "bm25" else "ts_rank_cd"
-    return [ChunkResult(h.text, h.document_id, h.index, h.filename, h.score, score_kind=kind) for h in hits]
+    return [
+        ChunkResult(h.text, h.document_id, h.index, h.filename, h.score, score_kind=kind)
+        for h in hits
+    ]
 
 
 def _fuse(
-    semantic: Sequence[ChunkResult], keyword_results: Sequence[ChunkResult], top_k: int, opts: RetrievalOptions
+    semantic: Sequence[ChunkResult],
+    keyword_results: Sequence[ChunkResult],
+    top_k: int,
+    opts: RetrievalOptions,
 ) -> list[ChunkResult]:
     """Fuse the two candidate lists (each best first) into one ranking of at most ``top_k`` results.
 
@@ -213,7 +239,10 @@ def _fuse(
     kw_rank: dict[Hashable, int] = {}
     sem_scored: list[tuple[Hashable, float]] = []
     kw_scored: list[tuple[Hashable, float]] = []
-    for results, ranks, scored in ((semantic, sem_rank, sem_scored), (keyword_results, kw_rank, kw_scored)):
+    for results, ranks, scored in (
+        (semantic, sem_rank, sem_scored),
+        (keyword_results, kw_rank, kw_scored),
+    ):
         for r in results:
             k = key_of(r)
             if k in ranks:
@@ -231,7 +260,11 @@ def _fuse(
         kind = "weighted"
     return [
         replace(
-            reps[k], score=score, score_kind=kind, semantic_rank=sem_rank.get(k), keyword_rank=kw_rank.get(k)
+            reps[k],
+            score=score,
+            score_kind=kind,
+            semantic_rank=sem_rank.get(k),
+            keyword_rank=kw_rank.get(k),
         )
         for k, score in fused[:top_k]
     ]
@@ -246,6 +279,7 @@ async def retrieve(
     session: AsyncSession,
     document_ids: list[uuid.UUID] | None = None,
     options: RetrievalOptions | None = None,
+    embed_query: EmbedQuery | None = None,
 ) -> list[ChunkResult]:
     """Return the best ``top_k`` chunks for ``query`` under ``options`` (default: semantic).
 
@@ -258,13 +292,17 @@ async def retrieve(
     # Over-fetch when de-duplicating so that dropped duplicates do not leave the answer short.
     pool = max(opts.candidates, top_k)
     if opts.mode == "semantic":
-        raw = await _semantic_raw(query, pool if opts.dedupe else top_k, embedder, store, document_ids)
+        raw = await _semantic_raw(
+            query, pool if opts.dedupe else top_k, embedder, store, document_ids, embed_query
+        )
         return _dedupe(await _enrich(raw, session), opts.dedupe)[:top_k]
     if opts.mode == "keyword":
-        return _dedupe(await _keyword(query, pool, opts, session, document_ids), opts.dedupe)[:top_k]
+        return _dedupe(await _keyword(query, pool, opts, session, document_ids), opts.dedupe)[
+            :top_k
+        ]
     # hybrid: the vector search runs in a worker thread while the SQL search runs on the session
     raw, kw = await asyncio.gather(
-        _semantic_raw(query, pool, embedder, store, document_ids),
+        _semantic_raw(query, pool, embedder, store, document_ids, embed_query),
         _keyword(query, pool, opts, session, document_ids),
     )
     semantic = await _enrich(raw, session)

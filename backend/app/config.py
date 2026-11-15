@@ -235,6 +235,22 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
 
+    # ── Query cache (ticket 37; see docs/configuration.md "Query cache") ─────────────
+    #: Master switch. The cache is fail-open: with Redis down requests are served uncached, never failed.
+    cache_enabled: bool = True
+    #: Dedicated Redis db (the Celery broker/results use 0/1); every key also carries the ``rag:cache:v1:`` prefix.
+    cache_redis_url: str = "redis://localhost:6379/12"
+    #: Per-layer lifetime in seconds; 0 switches that layer off.
+    cache_embedding_ttl_seconds: int = 86400
+    cache_retrieval_ttl_seconds: int = 600
+    cache_answer_ttl_seconds: int = 3600
+    #: Values larger than this are not stored (they would only evict useful entries).
+    cache_max_value_bytes: int = 262144
+    #: Per-operation Redis timeout; a slower Redis is treated as down.
+    cache_timeout_ms: int = 100
+    #: After a Redis failure the cache is skipped for this long (no per-request timeout penalty).
+    cache_breaker_seconds: float = 5.0
+
     # ── Vector store (Chroma default, pgvector optional; see docs/configuration.md) ──
     vector_store: str = "chroma"
     chroma_host: str = "localhost"
@@ -362,6 +378,7 @@ class Settings(BaseSettings):
             raise SettingsError(f"retrieval_neighbors must be within 0..{MAX_NEIGHBORS}.")
         self._validate_retrieval()
         self._validate_storage()
+        self._validate_cache()
         for name in ("llm_price_input_per_mtok", "llm_price_output_per_mtok"):
             price = getattr(self, name)
             if price is not None and price < 0:
@@ -376,9 +393,7 @@ class Settings(BaseSettings):
             raise SettingsError("cleanup_orphan_age_hours must be >= 0.")
         self._warn_langfuse()
         if not (256 <= self.parser_max_completion_tokens <= 32000):
-            raise SettingsError(
-                "parser_max_completion_tokens must be within 256..32000."
-            )
+            raise SettingsError("parser_max_completion_tokens must be within 256..32000.")
         return self
 
     @property
@@ -434,6 +449,31 @@ class Settings(BaseSettings):
         if self.url_ingest_max_bytes is not None and self.url_ingest_max_bytes < 1:
             raise SettingsError("URL_INGEST_MAX_BYTES must be >= 1 (or unset).")
 
+    def _validate_cache(self) -> None:
+        if not self.cache_redis_url.startswith(("redis://", "rediss://", "unix://")):
+            raise SettingsError("CACHE_REDIS_URL must start with redis://, rediss:// or unix://.")
+        for name, value, low, high in (
+            ("CACHE_EMBEDDING_TTL_SECONDS", self.cache_embedding_ttl_seconds, 0, 30 * 86400),
+            ("CACHE_RETRIEVAL_TTL_SECONDS", self.cache_retrieval_ttl_seconds, 0, 30 * 86400),
+            ("CACHE_ANSWER_TTL_SECONDS", self.cache_answer_ttl_seconds, 0, 30 * 86400),
+            ("CACHE_MAX_VALUE_BYTES", self.cache_max_value_bytes, 1024, 16 * 1024 * 1024),
+            ("CACHE_TIMEOUT_MS", self.cache_timeout_ms, 10, 5000),
+        ):
+            if not low <= value <= high:
+                raise SettingsError(f"{name} must be within {low}..{high} (got {value}).")
+        if not 0.5 <= self.cache_breaker_seconds <= 300:
+            raise SettingsError(
+                f"CACHE_BREAKER_SECONDS must be within 0.5..300 (got {self.cache_breaker_seconds})."
+            )
+        if self.cache_enabled and self.cache_redis_url in (
+            self.celery_broker_url,
+            self.celery_result_backend,
+        ):
+            raise SettingsError(
+                "CACHE_REDIS_URL must not be the Celery broker/result Redis db (a cache purge must never touch "
+                "Celery keys); use another db number, e.g. redis://localhost:6379/12."
+            )
+
     def _validate_retrieval(self) -> None:
         for name, value, allowed in (
             ("RETRIEVAL_MODE", self.retrieval_mode, RETRIEVAL_MODES),
@@ -450,9 +490,16 @@ class Settings(BaseSettings):
         for key, (number, low, high) in int_ranges.items():
             if not low <= number <= high:
                 raise SettingsError(f"{key} must be within {low}..{high} (got {number}).")
-        floats = (self.bm25_k1, self.bm25_b, self.retrieval_weight_semantic, self.retrieval_weight_keyword)
+        floats = (
+            self.bm25_k1,
+            self.bm25_b,
+            self.retrieval_weight_semantic,
+            self.retrieval_weight_keyword,
+        )
         if not all(math.isfinite(f) for f in floats):
-            raise SettingsError("BM25_K1, BM25_B and the RETRIEVAL_WEIGHT_* values must be finite numbers.")
+            raise SettingsError(
+                "BM25_K1, BM25_B and the RETRIEVAL_WEIGHT_* values must be finite numbers."
+            )
         if not 0 <= self.bm25_k1 <= 10:
             raise SettingsError(f"bm25_k1 must be within 0..10 (got {self.bm25_k1}).")
         if not 0 <= self.bm25_b <= 1:
@@ -517,9 +564,13 @@ class Settings(BaseSettings):
             return
         log = logging.getLogger(__name__)
         if not (self.langfuse_public_key and self.langfuse_secret_key):
-            log.warning("Langfuse is half-configured (need both public and secret key); tracing off.")
+            log.warning(
+                "Langfuse is half-configured (need both public and secret key); tracing off."
+            )
         if not self.langfuse_host.startswith(("http://", "https://")):
-            log.warning("LANGFUSE_HOST %r is not an http(s) URL; tracing may fail.", self.langfuse_host)
+            log.warning(
+                "LANGFUSE_HOST %r is not an http(s) URL; tracing may fail.", self.langfuse_host
+            )
         if self.langfuse_public_key and not self.langfuse_public_key.startswith("pk-"):
             log.warning("LANGFUSE_PUBLIC_KEY does not look like a Langfuse public key (pk-...).")
         if self.langfuse_secret_key and not self.langfuse_secret_key.startswith("sk-"):

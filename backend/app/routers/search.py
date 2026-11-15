@@ -4,7 +4,7 @@ import time
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -14,6 +14,7 @@ from app.routers.deps import get_embedder_dep, get_session, get_settings, get_st
 from app.schema.search import ContextChunk, SearchRequest, SearchResponse, SearchResult
 from app.services import traces
 from app.services.auth.permissions import Permission
+from app.services.cache import CacheCall, get_cache, wants_bypass
 from app.services.embeddings import Embedder
 from app.services.retriever import RetrievalOptions
 from app.services.search import retrieve_ranked
@@ -49,6 +50,8 @@ the configuration (the message names the fix), `401`/`403` missing credentials /
 )
 async def search(
     req: SearchRequest,
+    request: Request,
+    response: Response,
     principal: Annotated[Principal, Depends(require(Permission.SEARCH_USE))],
     session: Annotated[AsyncSession, Depends(get_session)],
     cfg: Annotated[Settings, Depends(get_settings)],
@@ -58,6 +61,9 @@ async def search(
     top_k = req.top_k or cfg.default_top_k
     options = RetrievalOptions.from_settings(cfg, mode=req.mode, fusion=req.fusion)
     started = time.perf_counter()
+    call = CacheCall(
+        get_cache(cfg), bypass=wants_bypass(req.cache, request.headers.get("cache-control"))
+    )
     outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None}
     try:
         with log_context(question_chars=len(req.query)):
@@ -71,6 +77,7 @@ async def search(
                 store=store,
                 session=session,
                 span_prefix="search",
+                cache=call,
             )
         outcome.update(status="ok", hits=len(retrieval.hits))
         results = [
@@ -85,14 +92,19 @@ async def search(
                 semantic_rank=h.semantic_rank,
                 keyword_rank=h.keyword_rank,
                 context=[
-                    ContextChunk(chunk_index=c.chunk_index, text=c.text if req.include_text else None)
+                    ContextChunk(
+                        chunk_index=c.chunk_index, text=c.text if req.include_text else None
+                    )
                     for c in retrieval.context_for(h)
                 ],
             )
             for h in retrieval.hits
         ]
         took_ms = int((time.perf_counter() - started) * 1000)
-        logger.info("search_done", hits=len(results), took_ms=took_ms)
+        logger.info(
+            "search_done", hits=len(results), took_ms=took_ms, cache=call.result("retrieval")
+        )
+        response.headers.update(call.header("retrieval"))
         return SearchResponse(
             query=req.query,
             mode=options.mode,
@@ -101,6 +113,7 @@ async def search(
             neighbors=req.neighbors,
             returned=len(results),
             took_ms=took_ms,
+            cache=call.result("retrieval"),
             results=results,
         )
     except HTTPException as exc:
@@ -124,6 +137,7 @@ async def search(
                 "neighbors": req.neighbors,
                 "document_filter": len(req.document_ids or []),
                 "include_text": req.include_text,
+                **({"cache": call.trace_meta("retrieval")} if call.active else {}),
                 **options.trace_meta(),
             },
         )

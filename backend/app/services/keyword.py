@@ -42,6 +42,8 @@ from dataclasses import dataclass
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services import cache
+
 #: Query text beyond this is ignored (the API caps questions at 4,000 characters anyway).
 MAX_QUERY_CHARS = 2000
 #: At most this many distinct lexemes are looked at; the rarest ``MAX_QUERY_TERMS`` of them are used.
@@ -75,7 +77,9 @@ def bm25_idf(n_docs: int, doc_freq: int) -> float:
     return math.log(1.0 + (n_docs - doc_freq + 0.5) / (doc_freq + 0.5))
 
 
-def bm25_term_score(tf: int, doc_len: float, avg_len: float, idf: float, k1: float, b: float) -> float:
+def bm25_term_score(
+    tf: int, doc_len: float, avg_len: float, idf: float, k1: float, b: float
+) -> float:
     """One term's contribution: ``idf * tf (k1 + 1) / (tf + k1 (1 - b + b dl / avgdl))``."""
     if tf <= 0:
         return 0.0
@@ -159,13 +163,20 @@ async def rebuild_fts(session: AsyncSession, config: str) -> None:
         raise ValueError(f"Postgres has no text-search configuration named {config!r}")
     vec = f"to_tsvector('{config}'::regconfig, text)"
     await session.execute(text("DROP INDEX IF EXISTS ix_chunks_fts"))
-    await session.execute(text("ALTER TABLE chunks DROP COLUMN IF EXISTS fts, DROP COLUMN IF EXISTS fts_len"))
-    await session.execute(text(f"ALTER TABLE chunks ADD COLUMN fts tsvector GENERATED ALWAYS AS ({vec}) STORED"))
     await session.execute(
-        text(f"ALTER TABLE chunks ADD COLUMN fts_len integer GENERATED ALWAYS AS (rag_fts_len({vec})) STORED")
+        text("ALTER TABLE chunks DROP COLUMN IF EXISTS fts, DROP COLUMN IF EXISTS fts_len")
+    )
+    await session.execute(
+        text(f"ALTER TABLE chunks ADD COLUMN fts tsvector GENERATED ALWAYS AS ({vec}) STORED")
+    )
+    await session.execute(
+        text(
+            f"ALTER TABLE chunks ADD COLUMN fts_len integer GENERATED ALWAYS AS (rag_fts_len({vec})) STORED"
+        )
     )
     await session.execute(text("CREATE INDEX ix_chunks_fts ON chunks USING gin (fts)"))
     await session.commit()
+    await cache.abump_index_version()  # keyword scores/ranking depend on the tsvector configuration
 
 
 # ── search ───────────────────────────────────────────────────────────────────────────────────
@@ -210,7 +221,9 @@ async def _doc_freqs(session: AsyncSession, queries: Mapping[str, str]) -> dict[
     branches = []
     for i, (key, tsq) in enumerate(queries.items()):
         params[f"t{i}"], params[f"l{i}"] = tsq, key
-        branches.append(f"SELECT CAST(:l{i} AS text) AS term, count(*) AS df FROM chunks WHERE fts @@ CAST(:t{i} AS tsquery)")
+        branches.append(
+            f"SELECT CAST(:l{i} AS text) AS term, count(*) AS df FROM chunks WHERE fts @@ CAST(:t{i} AS tsquery)"
+        )
     rows = await session.execute(text(" UNION ALL ".join(branches)), params)
     return {str(r[0]): int(r[1]) for r in rows}
 
@@ -246,7 +259,9 @@ async def keyword_search(
     else:
         df = await _doc_freqs(session, {**{t: quote_lexeme(t) for t in lexemes}, **phrase_queries})
         # keep the rarest terms: they carry the most weight and bound the query size
-        terms = sorted((t for t in lexemes if df.get(t, 0) > 0), key=lambda t: (df[t], t))[:MAX_QUERY_TERMS]
+        terms = sorted((t for t in lexemes if df.get(t, 0) > 0), key=lambda t: (df[t], t))[
+            :MAX_QUERY_TERMS
+        ]
         found_phrases = {k: v for k, v in phrase_queries.items() if df.get(k, 0) > 0}
         if not terms:
             return []
@@ -268,11 +283,16 @@ async def keyword_search(
         return []
     if method == "postgres_fts":
         return [
-            KeywordHit(r.document_id, int(r.chunk_index), str(r.text), str(r.filename), float(r.rank)) for r in rows[:limit]
+            KeywordHit(
+                r.document_id, int(r.chunk_index), str(r.text), str(r.filename), float(r.rank)
+            )
+            for r in rows[:limit]
         ]
 
     stats = (
-        await session.execute(text("SELECT count(*) AS n, coalesce(avg(fts_len), 0) AS avgdl FROM chunks"))
+        await session.execute(
+            text("SELECT count(*) AS n, coalesce(avg(fts_len), 0) AS avgdl FROM chunks")
+        )
     ).one()
     n_docs, avg_len = int(stats.n), float(stats.avgdl)
     ids = [r.id for r in rows]
@@ -286,10 +306,17 @@ async def keyword_search(
     )
     tfs: dict[uuid.UUID, dict[str, int]] = defaultdict(dict)
     for r in tf_rows:
-        tfs[r.id][str(r.lexeme)] = int(r.tf or 1)  # position-less lexemes (stripped tsvector) count once
-    for key, phrase_q in found_phrases.items():  # an ID phrase is one extra term with tf = 1 where present
+        tfs[r.id][str(r.lexeme)] = int(
+            r.tf or 1
+        )  # position-less lexemes (stripped tsvector) count once
+    for (
+        key,
+        phrase_q,
+    ) in found_phrases.items():  # an ID phrase is one extra term with tf = 1 where present
         matched = await session.execute(
-            text("SELECT id FROM chunks WHERE id = ANY(CAST(:ids AS uuid[])) AND fts @@ CAST(:q AS tsquery)"),
+            text(
+                "SELECT id FROM chunks WHERE id = ANY(CAST(:ids AS uuid[])) AND fts @@ CAST(:q AS tsquery)"
+            ),
             {"ids": ids, "q": phrase_q},
         )
         for (cid,) in matched:
@@ -300,8 +327,16 @@ async def keyword_search(
         if not freqs:  # chunk vanished between the queries (document deleted mid-flight)
             continue
         score = bm25_score(
-            freqs, doc_len=float(r.fts_len or 0), avg_len=avg_len, n_docs=n_docs, doc_freqs=df, k1=k1, b=b
+            freqs,
+            doc_len=float(r.fts_len or 0),
+            avg_len=avg_len,
+            n_docs=n_docs,
+            doc_freqs=df,
+            k1=k1,
+            b=b,
         )
-        scored.append(KeywordHit(r.document_id, int(r.chunk_index), str(r.text), str(r.filename), score))
+        scored.append(
+            KeywordHit(r.document_id, int(r.chunk_index), str(r.text), str(r.filename), score)
+        )
     scored.sort(key=lambda h: (-h.score, str(h.document_id), h.index))
     return scored[:limit]

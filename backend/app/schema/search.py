@@ -23,15 +23,22 @@ class SearchRequest(BaseModel):
         }
     )
 
-    query: str = Field(min_length=1, max_length=4000, description="Natural-language or keyword query.")
+    query: str = Field(
+        min_length=1, max_length=4000, description="Natural-language or keyword query."
+    )
     top_k: int | None = Field(
-        default=None, ge=1, le=50, description="Number of hits (default: the deployment's DEFAULT_TOP_K)."
+        default=None,
+        ge=1,
+        le=50,
+        description="Number of hits (default: the deployment's DEFAULT_TOP_K).",
     )
     mode: Literal["semantic", "keyword", "hybrid"] | None = Field(
-        default=None, description="Override RETRIEVAL_MODE: embeddings, Postgres BM25, or both fused."
+        default=None,
+        description="Override RETRIEVAL_MODE: embeddings, Postgres BM25, or both fused.",
     )
     fusion: Literal["rrf", "weighted"] | None = Field(
-        default=None, description="Override RETRIEVAL_FUSION (only used by `hybrid`; validated in every mode)."
+        default=None,
+        description="Override RETRIEVAL_FUSION (only used by `hybrid`; validated in every mode).",
     )
     neighbors: int = Field(
         default=0,
@@ -51,6 +58,14 @@ class SearchRequest(BaseModel):
         description="false returns ids, ranks and scores only (`text` is null): a cheap ranking probe.",
     )
 
+    cache: bool | None = Field(
+        default=None,
+        description=(
+            "`false` bypasses the query cache for this request (no read, no write); same as the request header "
+            "`Cache-Control: no-cache`. Omit to use the cache when it is enabled."
+        ),
+    )
+
 
 class ContextChunk(BaseModel):
     """A neighbouring chunk of a hit. Unscored: it was not retrieved, it only surrounds the hit."""
@@ -60,32 +75,47 @@ class ContextChunk(BaseModel):
 
 
 class SearchResult(BaseModel):
-    rank: int = Field(description="1-based position, best first. Results are always sorted by rank.")
+    rank: int = Field(
+        description="1-based position, best first. Results are always sorted by rank."
+    )
     document_id: uuid.UUID
     chunk_index: int
     filename: str
     text: str | None = Field(description="The chunk text; null when `include_text` is false.")
-    score: float = Field(description="Meaning depends on `score_kind`; comparable only within one response.")
+    score: float = Field(
+        description="Meaning depends on `score_kind`; comparable only within one response."
+    )
     score_kind: str = Field(
         description=(
             "`distance` (lower = closer; semantic) | `bm25` | `ts_rank_cd` | `rrf` | `weighted` "
             "(higher = better)."
         )
     )
-    semantic_rank: int | None = Field(default=None, description="Hybrid only: 1-based rank in the semantic list.")
-    keyword_rank: int | None = Field(default=None, description="Hybrid only: 1-based rank in the keyword list.")
+    semantic_rank: int | None = Field(
+        default=None, description="Hybrid only: 1-based rank in the semantic list."
+    )
+    keyword_rank: int | None = Field(
+        default=None, description="Hybrid only: 1-based rank in the keyword list."
+    )
     is_hit: Literal[True] = True
     context: list[ContextChunk] = Field(
-        default_factory=list, description="Neighbouring chunks in document order; empty unless `neighbors` > 0."
+        default_factory=list,
+        description="Neighbouring chunks in document order; empty unless `neighbors` > 0.",
     )
 
 
 class SearchResponse(BaseModel):
     query: str
     mode: str = Field(description="The retrieval mode actually used.")
-    fusion: str | None = Field(description="The fusion method actually used; null unless mode is `hybrid`.")
+    fusion: str | None = Field(
+        description="The fusion method actually used; null unless mode is `hybrid`."
+    )
     top_k: int
     neighbors: int
     returned: int = Field(description="Number of hits in `results`.")
     took_ms: int = Field(description="Server-side time spent retrieving.")
+    cache: str | None = Field(
+        default=None,
+        description="Query-cache verdict: `hit` | `miss` | `bypass` | `off` (also the `X-Cache` header).",
+    )
     results: list[SearchResult]

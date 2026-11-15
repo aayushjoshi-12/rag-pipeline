@@ -24,7 +24,7 @@ from app.db import ops
 from app.db.enums import DocumentStatus, JobStatus
 from app.db.models import Document
 from app.observability import log_context
-from app.services import observability, traces
+from app.services import cache, observability, traces
 from app.services.chunking import ChunkSpec, chunk_text
 from app.services.embeddings import Embedder
 from app.services.fetcher import Fetched, fetch_to_storage
@@ -79,10 +79,21 @@ async def ingest_document(
     ``fetch_url`` is the full link of a URL-ingested document that has not been downloaded yet; it
     is deliberately not stored in the DB (it may carry a presigned-URL secret).
     """
-    with log_context(job_id=str(job_id)), observability.span("ingest.document", job_id=str(job_id)) as root:
+    with (
+        log_context(job_id=str(job_id)),
+        observability.span("ingest.document", job_id=str(job_id)) as root,
+    ):
         started = time.perf_counter()
         status = await _ingest(
-            job_id, session, settings, parse_fn, embedder, store, fetch_url, fetch_fn, storage_factory
+            job_id,
+            session,
+            settings,
+            parse_fn,
+            embedder,
+            store,
+            fetch_url,
+            fetch_fn,
+            storage_factory,
         )
         await _record_trace(job_id, status, started, session, settings)
         root.update(output=status.value)
@@ -144,20 +155,25 @@ async def _ingest(
                 fetched = await asyncio.to_thread(
                     fetch_fn, fetch_url, settings, storage_factory(settings, None)
                 )
-            doc = await ops.set_document_source(
-                doc_id,
-                filename=fetched.filename,
-                content_type=fetched.content_type,
-                source_path=fetched.key,
-                storage_backend=fetched.storage,
-                session=session,
-            ) or doc
+            doc = (
+                await ops.set_document_source(
+                    doc_id,
+                    filename=fetched.filename,
+                    content_type=fetched.content_type,
+                    source_path=fetched.key,
+                    storage_backend=fetched.storage,
+                    session=session,
+                )
+                or doc
+            )
             link_stats = {
                 "source_url": fetched.source_url,
                 "bytes_downloaded": fetched.size,
                 "storage": fetched.storage,
             }
-            await ops.update_job_status(job_id, JobStatus.RUNNING, stats=link_stats, session=session)
+            await ops.update_job_status(
+                job_id, JobStatus.RUNNING, stats=link_stats, session=session
+            )
         if not doc.source_path:
             raise IngestError("document has no source_path")
 
@@ -213,7 +229,9 @@ async def _ingest(
         ]
 
         with observability.span("ingest.store", chunks=len(chunk_dicts), mode=plan.mode):
-            wrote_vectors = True  # from here a failure leaves a clean slate (next run = full rebuild)
+            wrote_vectors = (
+                True  # from here a failure leaves a clean slate (next run = full rebuild)
+            )
             if plan.mode == "full":
                 await asyncio.to_thread(store.delete_doc, doc_key)
             else:
@@ -244,7 +262,11 @@ async def _ingest(
                     store.update_metadata,
                     [vector_id(doc_key, h) for h in moved],
                     [
-                        {"index": first_spec[h].index, "start": first_spec[h].start, "end": first_spec[h].end}
+                        {
+                            "index": first_spec[h].index,
+                            "start": first_spec[h].start,
+                            "end": first_spec[h].end,
+                        }
                         for h in moved
                     ],
                 )
@@ -264,6 +286,9 @@ async def _ingest(
         }
         await ops.update_job_status(job_id, JobStatus.DONE, stats=stats, session=session)
         await ops.update_document_status(doc_id, DocumentStatus.READY, session=session)
+        await (
+            cache.abump_index_version()
+        )  # the new chunks are now searchable: drop cached retrievals
         logger.info("ingest_done", doc_id=doc_key, **stats)
         return JobStatus.DONE
     except Exception as exc:
@@ -289,5 +314,9 @@ async def _record_failure(
             await ops.delete_chunks_by_document(doc_id, session=session)
         await ops.update_job_status(job_id, JobStatus.FAILED, error=message, session=session)
         await ops.update_document_status(doc_id, DocumentStatus.FAILED, session=session)
+        if (
+            wrote_vectors
+        ):  # the document's vectors/chunks were removed: cached retrievals may still show them
+            await cache.abump_index_version()
     except Exception:
         logger.exception("ingest_failure_not_recorded")

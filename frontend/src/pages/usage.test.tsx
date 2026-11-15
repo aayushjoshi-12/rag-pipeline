@@ -14,6 +14,7 @@ vi.mock('../api/client', () => ({
     usage: vi.fn(),
     usageInsights: vi.fn(),
     usageCredits: vi.fn(),
+    cacheStats: vi.fn(),
   },
   ApiError: class ApiError extends Error {},
 }))
@@ -73,6 +74,7 @@ beforeEach(() => {
   m.usage.mockResolvedValue([day()])
   m.usageInsights.mockResolvedValue(insights())
   m.usageCredits.mockResolvedValue(credits())
+  m.cacheStats.mockRejectedValue(new Error('not stubbed'))
 })
 
 describe('Usage tabs', () => {
@@ -81,7 +83,13 @@ describe('Usage tabs', () => {
     renderAt('/usage')
     await screen.findByTestId('tile-requests')
     const tabs = screen.getAllByRole('tab')
-    expect(tabs.map((t) => t.textContent)).toEqual(['Cost', 'Performance', 'RAG health', 'Ingest'])
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      'Cost',
+      'Performance',
+      'RAG health',
+      'Ingest',
+      'Cache',
+    ])
     expect(screen.getByRole('tab', { name: 'Cost' })).toHaveAttribute('aria-selected', 'true')
     expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
     expect(screen.getByRole('tabpanel')).toHaveAccessibleName('Cost')
@@ -104,9 +112,10 @@ describe('Usage tabs', () => {
   it('is a keyboard tablist: arrows move and activate, Home/End jump, one Tab stop', async () => {
     renderAt('/usage')
     await screen.findByTestId('tile-requests')
-    const [cost, perf, rag, ingest] = screen.getAllByRole('tab')
-    expect([cost, perf, rag, ingest].map((t) => t!.getAttribute('tabindex'))).toEqual([
+    const [cost, perf, rag, ingest, cache] = screen.getAllByRole('tab')
+    expect([cost, perf, rag, ingest, cache].map((t) => t!.getAttribute('tabindex'))).toEqual([
       '0',
+      '-1',
       '-1',
       '-1',
       '-1',
@@ -116,11 +125,11 @@ describe('Usage tabs', () => {
     expect(perf).toHaveAttribute('aria-selected', 'true')
     expect(document.activeElement).toBe(perf)
     await userEvent.keyboard('{End}')
-    expect(ingest).toHaveAttribute('aria-selected', 'true')
+    expect(cache).toHaveAttribute('aria-selected', 'true')
     await userEvent.keyboard('{ArrowRight}') // wraps to the first
     expect(cost).toHaveAttribute('aria-selected', 'true')
     await userEvent.keyboard('{ArrowLeft}') // wraps to the last
-    expect(ingest).toHaveAttribute('aria-selected', 'true')
+    expect(cache).toHaveAttribute('aria-selected', 'true')
     await userEvent.keyboard('{Home}')
     expect(cost).toHaveAttribute('aria-selected', 'true')
   })
@@ -434,5 +443,48 @@ describe('performance, RAG and ingest tabs', () => {
       await screen.findByRole('table', { name: 'ingest duration by mode', hidden: true }),
     ).toBeInTheDocument()
     expect(screen.getByText('Table view')).toBeInTheDocument()
+  })
+})
+
+describe('Cache tab', () => {
+  const kind = (over = {}) => ({
+    requests: 10,
+    with_cache_info: 10,
+    hits: 6,
+    misses: 4,
+    bypassed: 0,
+    hit_rate: 0.6,
+    avg_hit_ms: 3,
+    avg_miss_ms: 120,
+    layers: { retrieval: { hit: 6, miss: 4 } },
+    llm_calls_avoided: 0,
+    embeddings_avoided: 6,
+    saved_usd: null,
+    ...over,
+  })
+
+  it('shows hit rates, latency and avoided calls from /cache/stats', async () => {
+    m.cacheStats.mockResolvedValue({
+      config: { enabled: true },
+      process: { enabled: true, breaker_open: false, last_error: null },
+      redis: { reachable: true, keys: { retrieval: 4, embedding: 3, answer: 0 } },
+      traces: { search: kind(), chat: kind({ llm_calls_avoided: 2, saved_usd: 0.004 }) },
+    })
+    renderAt('/usage?tab=cache')
+    expect(await screen.findByTestId('tile-cache-search')).toHaveTextContent('60.0%')
+    expect(screen.getByTestId('tile-cache-latency')).toHaveTextContent('3')
+    expect(screen.getByTestId('tile-cache-llm')).toHaveTextContent('2')
+    expect(m.cacheStats).toHaveBeenCalledWith(14)
+  })
+
+  it('warns when Redis is unreachable', async () => {
+    m.cacheStats.mockResolvedValue({
+      config: { enabled: true },
+      process: { enabled: true, breaker_open: true, last_error: 'x' },
+      redis: { reachable: false, keys: {}, error: 'refused' },
+      traces: { search: kind({ hit_rate: null }), chat: kind({ hit_rate: null }) },
+    })
+    renderAt('/usage?tab=cache')
+    expect(await screen.findByText(/Redis is not reachable/)).toBeInTheDocument()
   })
 })

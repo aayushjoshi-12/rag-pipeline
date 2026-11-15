@@ -255,3 +255,10 @@ for hit in r.json()["results"]:
 Store the key in your secret manager (a Kubernetes `Secret`, not in the image or in git) and rotate by creating a
 second key, deploying it, then revoking the first.
 <!-- ===== end Ticket 35 ===== -->
+
+## Query cache headers and endpoints
+
+`POST /search` and `POST /chat` answer with `X-Cache: hit|miss|bypass|off` and, per layer, `X-Cache-Layers: embedding=hit,retrieval=miss,...`; the JSON body has the
+same verdict in `cache`. Send `"cache": false` (or `Cache-Control: no-cache`) to bypass it for one request. `GET /cache/stats?days=7` (permission `traces:read`)
+and `POST /cache/purge` (permission `cache:manage`). See [`configuration.md`](./configuration.md#query-cache).
+

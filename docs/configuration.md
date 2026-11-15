@@ -339,3 +339,36 @@ API keys need **no new settings**: they are stored in Postgres (`api_keys`, migr
 
 See [`docs/api.md`](./api.md#authentication-for-services-api-keys) for the security model and a curl/Python recipe.
 <!-- ===== end Ticket 35 ===== -->
+
+## Query cache
+
+Three layers in the existing Redis (own db, keys under `rag:cache:v1:`), all **fail-open**: with Redis down, slow or full
+a request is served uncached, never failed. Implemented in `app/services/cache.py`; benchmark in [`performance.md`](./performance.md).
+
+| Key | Default | Meaning |
+|---|---|---|
+| `CACHE_ENABLED` | `true` | Master switch. `false` = `X-Cache: off`, no Redis calls. |
+| `CACHE_REDIS_URL` | `redis://localhost:6379/12` | Must not equal the Celery broker/result URL (startup error): a purge never touches Celery keys. Compose/K8s set `redis://redis:6379/12`. |
+| `CACHE_EMBEDDING_TTL_SECONDS` | `86400` | L1: query embedding (saves the Ollama/OpenAI call). `0` = layer off. |
+| `CACHE_RETRIEVAL_TTL_SECONDS` | `600` | L2: ranked passages for `/search` and `/chat`. `0` = off. |
+| `CACHE_ANSWER_TTL_SECONDS` | `3600` | L3: the `/chat` answer (saves the LLM call and its cost). `0` = off. |
+| `CACHE_MAX_VALUE_BYTES` | `262144` | Larger values are not stored. |
+| `CACHE_TIMEOUT_MS` | `100` | Per Redis operation; slower = treated as down. |
+| `CACHE_BREAKER_SECONDS` | `5` | After a failure the cache is skipped this long, so an outage adds no per-request latency. |
+
+- **Keys.** L1: embedding model + query (NFC, trimmed, whitespace collapsed; **case is preserved**, embedding models are case sensitive). L2: query,
+  `top_k`, neighbours, sorted document filter, only the retrieval options that matter for the mode, a fingerprint of the vector-store /
+  embedding / chunking settings and the **index version**. L3: question + hash of the *exact* prompt including the retrieved context + model + system prompt.
+  An answer is therefore never reused for a different context. Keys contain no user identity: the corpus is shared, and authorization always runs
+  before any cache lookup. If per-user document ownership is ever added, add the owner/ACL scope to the L2/L3 keys.
+- **Invalidation.** A random *index version* token in Redis is replaced after every change to what is searchable: ingest finish, delete, replace, reindex,
+  `rebuild-fts`, `rebuild-index`, and `POST /cache/purge`. Old entries become unreachable and expire by TTL. If Redis cannot be reached at that moment the
+  process remembers and purges when Redis returns; **a different process** that failed to bump relies on the TTL (default 10 minutes) or a manual purge.
+- **Bypass.** Body field `"cache": false` or request header `Cache-Control: no-cache`/`no-store`: no read, no write, `X-Cache: bypass`.
+- **Visibility.** Responses carry `X-Cache: hit|miss|bypass|off` (+ `X-Cache-Layers`), `/search` and `/chat` bodies a `cache` field, traces `meta.cache`.
+  `GET /cache/stats` (`traces:read`) returns live counters, Redis keyspace and trace-derived hit rates; `POST /cache/purge` needs the new permission
+  `cache:manage` (built-in `admin`, re-synced automatically). The dashboard shows it under Usage > Cache.
+- **Single flight.** Identical concurrent misses in one process compute once; followers wait. Across replicas it is one compute per replica.
+- **Not built:** a semantic (near-duplicate) cache. It trades correctness for hits and was left out; exact-after-normalisation repeats only.
+- Never cached: errors, empty answers, "no context" refusals.
+

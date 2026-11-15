@@ -12,11 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import async_session as _default_session
 from app.db.enums import DocumentStatus, JobStatus
 from app.db.models import Chunk, Document, Job
+from app.services import cache
 
 
-async def _acquire(
-    session: AsyncSession | None, stack: AsyncExitStack
-) -> AsyncSession:
+async def _acquire(session: AsyncSession | None, stack: AsyncExitStack) -> AsyncSession:
     """Return *session* as-is, or create + enter a fresh session via *stack*."""
     if session is not None:
         return session
@@ -109,7 +108,10 @@ async def replace_document_source(
         doc.storage_backend, doc.source_url = storage_backend, None
         await sess.commit()
         await sess.refresh(doc)
-        return doc
+    await (
+        cache.abump_index_version()
+    )  # the filename shown in results changes now; the chunks follow at ingest end
+    return doc
 
 
 async def set_document_source(
@@ -153,9 +155,7 @@ async def create_job(
     return job
 
 
-async def get_job(
-    job_id: uuid.UUID, *, session: AsyncSession | None = None
-) -> Job | None:
+async def get_job(job_id: uuid.UUID, *, session: AsyncSession | None = None) -> Job | None:
     async with AsyncExitStack() as stack:
         sess = await _acquire(session, stack)
         return await sess.get(Job, job_id)
@@ -232,9 +232,7 @@ async def list_chunks_by_document(
     async with AsyncExitStack() as stack:
         sess = await _acquire(session, stack)
         result = await sess.execute(
-            select(Chunk)
-            .where(Chunk.document_id == document_id)
-            .order_by(Chunk.index)
+            select(Chunk).where(Chunk.document_id == document_id).order_by(Chunk.index)
         )
         return list(result.scalars().all())
 
@@ -275,4 +273,5 @@ async def delete_document(document_id: uuid.UUID, *, session: AsyncSession | Non
             return False
         await sess.delete(doc)
         await sess.commit()
-        return True
+    await cache.abump_index_version()
+    return True
