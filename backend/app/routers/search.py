@@ -1,23 +1,19 @@
 from __future__ import annotations
 
-import time
-from typing import Annotated, Any
+from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.observability import log_context
+from app.routers._request import RequestTrace, retrieve_for_request
 from app.routers.auth_deps import Principal, require
 from app.routers.deps import get_embedder_dep, get_session, get_settings, get_store
 from app.schema.search import ContextChunk, SearchRequest, SearchResponse, SearchResult
-from app.services import traces
 from app.services.auth.permissions import Permission
-from app.services.cache import CacheCall, get_cache, wants_bypass
-from app.services.embeddings import Embedder, embedding_cost, measure_embeddings
-from app.services.retriever import RetrievalOptions
-from app.services.search import embedding_usage, retrieve_ranked
+from app.services.embeddings import Embedder, embedding_cost
 from app.services.vectorstore import VectorStore
 
 logger = structlog.get_logger(__name__)
@@ -58,32 +54,23 @@ async def search(
     embedder: Annotated[Embedder, Depends(get_embedder_dep)],
     store: Annotated[VectorStore, Depends(get_store)],
 ) -> SearchResponse:
-    top_k = req.top_k or cfg.default_top_k
-    options = RetrievalOptions.from_settings(cfg, mode=req.mode, fusion=req.fusion)
-    started = time.perf_counter()
-    call = CacheCall(
-        get_cache(cfg), bypass=wants_bypass(req.cache, request.headers.get("cache-control"))
+    rt = RequestTrace.start(
+        cfg, request, top_k=req.top_k, mode=req.mode, fusion=req.fusion, cache=req.cache
     )
-    outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None, "embedding": None}
+    options, call = rt.options, rt.call
     try:
-        with log_context(question_chars=len(req.query)), measure_embeddings() as meter:
-            retrieval = await retrieve_ranked(
+        with log_context(question_chars=len(req.query)):
+            retrieval = await retrieve_for_request(
+                rt,
                 req.query,
-                top_k=top_k,
                 neighbors=req.neighbors,
-                options=options,
                 document_ids=req.document_ids,
                 embedder=embedder,
                 store=store,
                 session=session,
                 span_prefix="search",
-                cache=call,
             )
-        outcome.update(
-            status="ok",
-            hits=len(retrieval.hits),
-            embedding=embedding_usage(meter, call, options.mode),
-        )
+        rt.status = "ok"
         results = [
             SearchResult(
                 rank=h.rank or 0,
@@ -104,7 +91,7 @@ async def search(
             )
             for h in retrieval.hits
         ]
-        took_ms = int((time.perf_counter() - started) * 1000)
+        took_ms = rt.elapsed_ms()
         logger.info(
             "search_done", hits=len(results), took_ms=took_ms, cache=call.result("retrieval")
         )
@@ -113,40 +100,31 @@ async def search(
             query=req.query,
             mode=options.mode,
             fusion=options.fusion if options.mode == "hybrid" else None,
-            top_k=top_k,
+            top_k=rt.top_k,
             neighbors=req.neighbors,
             returned=len(results),
             took_ms=took_ms,
             cache=call.result("retrieval"),
             results=results,
         )
-    except HTTPException as exc:
-        outcome["error"] = str(exc.detail)
-        raise
     except Exception as exc:
-        outcome["error"] = f"{type(exc).__name__}: {exc}"
+        rt.fail(exc)
         raise
     finally:
-        emb = outcome["embedding"]
-        await traces.record(
+        emb = rt.embedding
+        if emb:
+            rt.prompt, rt.completion, rt.cost = emb["tokens"], 0, embedding_cost(cfg, emb["tokens"])
+        await rt.record(
             session,
+            cfg,
+            principal,
             kind="search",
-            status=outcome["status"],
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            user_email=None if principal.anonymous else principal.email,
-            hits=outcome["hits"],
-            prompt_tokens=emb["tokens"] if emb else None,
-            completion_tokens=0 if emb else None,
-            cost_usd=embedding_cost(cfg, emb["tokens"]) if emb else None,
-            error=outcome["error"],
-            question=req.query if cfg.trace_capture_content else None,
-            meta={
-                "top_k": top_k,
-                "neighbors": req.neighbors,
-                "document_filter": len(req.document_ids or []),
-                "include_text": req.include_text,
-                **({"embedding": emb} if emb else {}),
-                **({"cache": call.trace_meta("retrieval")} if call.active else {}),
-                **options.trace_meta(),
-            },
+            question=req.query,
+            model=None,
+            meta=rt.meta(
+                neighbors=req.neighbors,
+                document_ids=req.document_ids,
+                layer="retrieval",
+                lead={"include_text": req.include_text},
+            ),
         )

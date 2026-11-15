@@ -2,19 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 import anyio
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.observability import log_context
+from app.routers._request import RequestTrace, llm_http_error, retrieve_for_request
 from app.routers.auth_deps import Principal, require
 from app.routers.deps import (
     get_embedder_dep,
@@ -24,20 +24,12 @@ from app.routers.deps import (
     get_store,
 )
 from app.schema.chat import ChatRequest, ChatResponse, ChunkRef, SourceOut
-from app.services import observability, traces
+from app.services import observability
 from app.services.auth.permissions import Permission
-from app.services.cache import CacheCall, get_cache, wants_bypass
-from app.services.embeddings import Embedder, measure_embeddings
-from app.services.llm import (
-    LLM,
-    LLMConfigError,
-    LLMError,
-    LLMRequestError,
-    LLMUnavailableError,
-)
+from app.services.embeddings import Embedder
+from app.services.llm import LLM, LLMError, LLMRequestError
 from app.services.qa import Answer, answer_question, prepare_stream, stream_answer
-from app.services.retriever import ChunkResult, RetrievalOptions
-from app.services.search import embedding_usage, retrieve_ranked
+from app.services.retriever import ChunkResult
 from app.services.vectorstore import VectorStore
 
 logger = structlog.get_logger(__name__)
@@ -56,139 +48,86 @@ async def chat(
     store: Annotated[VectorStore, Depends(get_store)],
     llm: Annotated[LLM | None, Depends(get_llm_dep)],
 ) -> ChatResponse:
-    top_k = req.top_k or cfg.default_top_k
-    neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
-    options = RetrievalOptions.from_settings(cfg, mode=req.mode, fusion=req.fusion)
-    started = time.perf_counter()
-    call = CacheCall(
-        get_cache(cfg), bypass=wants_bypass(req.cache, request.headers.get("cache-control"))
+    rt = RequestTrace.start(
+        cfg, request, top_k=req.top_k, mode=req.mode, fusion=req.fusion, cache=req.cache
     )
-    outcome: dict[str, Any] = {
-        "status": "error",
-        "error": None,
-        "hits": None,
-        "prompt": None,
-        "completion": None,
-        "cost": None,
-        "cited": [],
-        "embedding": None,
-    }
+    neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
     try:
-        out = await _chat(
-            req, top_k, neighbors, options, session, cfg, embedder, store, llm, outcome, call
-        )
-        response.headers.update(call.header("answer"))
+        out = await _chat(req, rt, neighbors, session, embedder, store, llm)
+        response.headers.update(rt.call.header("answer"))
         return out
-    except HTTPException as exc:
-        outcome["error"] = str(exc.detail)
-        raise
     except Exception as exc:
-        outcome["error"] = f"{type(exc).__name__}: {exc}"
+        rt.fail(exc)
         raise
     finally:
-        await traces.record(
+        await rt.record(
             session,
+            cfg,
+            principal,
             kind="chat",
-            status=outcome["status"],
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            user_email=None if principal.anonymous else principal.email,
+            question=req.question,
             model=getattr(llm, "model", None),
-            prompt_tokens=outcome["prompt"],
-            completion_tokens=outcome["completion"],
-            hits=outcome["hits"],
-            cost_usd=outcome["cost"],
-            error=outcome["error"],
-            question=req.question if cfg.trace_capture_content else None,
-            meta={
-                "top_k": top_k,
-                "neighbors": neighbors,
-                "document_filter": len(req.document_ids or []),
-                # ids only (never content): which documents the answer was grounded on
-                "cited_document_ids": outcome["cited"],
-                **({"embedding": outcome["embedding"]} if outcome["embedding"] else {}),
-                **({"cache": call.trace_meta("answer")} if call.active else {}),
-                **options.trace_meta(),
-            },
+            meta=rt.meta(
+                neighbors=neighbors,
+                document_ids=req.document_ids,
+                layer="answer",
+                lead={"cited_document_ids": rt.cited},
+            ),
         )
 
 
 async def _chat(
     req: ChatRequest,
-    top_k: int,
+    rt: RequestTrace,
     neighbors: int,
-    options: RetrievalOptions,
     session: AsyncSession,
-    cfg: Settings,
     embedder: Embedder,
     store: VectorStore,
     llm: LLM | None,
-    outcome: dict[str, Any],
-    call: CacheCall,
 ) -> ChatResponse:
     with (
         log_context(chat_id=uuid.uuid4().hex, question_chars=len(req.question)),
         observability.span(
             "chat.request",
             input=req.question,
-            top_k=top_k,
+            top_k=rt.top_k,
             document_filter=len(req.document_ids or []),
-            retrieval_mode=options.mode,
+            retrieval_mode=rt.options.mode,
         ) as root,
     ):
-        with measure_embeddings() as meter:
-            retrieval = await retrieve_ranked(
-                req.question,
-                top_k=top_k,
-                neighbors=neighbors,
-                options=options,
-                document_ids=req.document_ids,
-                embedder=embedder,
-                store=store,
-                session=session,
-                span_prefix="chat",
-                cache=call,
-            )
+        retrieval = await retrieve_for_request(
+            rt,
+            req.question,
+            neighbors=neighbors,
+            document_ids=req.document_ids,
+            embedder=embedder,
+            store=store,
+            session=session,
+            span_prefix="chat",
+        )
         chunks = retrieval.passages
-        outcome["hits"] = len(retrieval.hits)
-        outcome["embedding"] = embedding_usage(meter, call, options.mode)
 
         try:
             with observability.span("chat.answer", sources=len(chunks)):
-                result = await answer_question(req.question, chunks, llm, cache=call)
-        except (LLMUnavailableError, LLMConfigError) as exc:
-            _keep_usage(outcome, exc)
-            logger.warning("llm_unavailable", error=str(exc))
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-        except LLMRequestError as exc:
-            _keep_usage(outcome, exc)
-            logger.warning("llm_rejected", error=str(exc))
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
+                result = await answer_question(req.question, chunks, llm, cache=rt.call)
+        except LLMError as exc:
+            rt.keep_usage(exc)
+            logger.warning(
+                "llm_rejected" if isinstance(exc, LLMRequestError) else "llm_unavailable",
+                error=str(exc),
+            )
+            raise llm_http_error(exc) from exc
 
-        outcome.update(
-            status="ok",
-            prompt=result.prompt_tokens,
-            completion=result.completion_tokens,
-            cost=result.cost_usd,
-            cited=list(dict.fromkeys(str(c.document_id) for c in result.sources if c.is_hit)),
-        )
+        rt.succeed(result)
         root.update(
             output=observability.maybe_content(result.answer),
             metadata={"sources": len(result.sources)},
         )
         logger.info("chat_answered", sources=len(result.sources))
         return ChatResponse(
-            cache=call.result("answer"),
+            cache=rt.call.result("answer"),
             answer=result.answer,
             sources=[_source_out(c) for c in result.sources],
-        )
-
-
-def _keep_usage(outcome: dict[str, Any], exc: Exception) -> None:
-    """A failed LLM call may still have been billed: keep what the provider reported on the trace."""
-    usage = exc.usage if isinstance(exc, LLMError) else None
-    if usage is not None:
-        outcome.update(
-            prompt=usage.prompt_tokens, completion=usage.completion_tokens, cost=usage.cost_usd
         )
 
 
@@ -217,12 +156,6 @@ def sse(event: str, data: dict[str, Any]) -> bytes:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode()
 
 
-def _llm_http_error(exc: LLMError) -> HTTPException:
-    if isinstance(exc, LLMRequestError):
-        return HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc))
-    return HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc))
-
-
 @router.post(
     "/chat/stream",
     response_class=StreamingResponse,
@@ -244,89 +177,59 @@ async def chat_stream(
     response starts and is a normal HTTP error. After that the stream ends with exactly one ``done`` or
     ``error`` event, unless the client left, in which case the upstream LLM call is cancelled.
     """
-    top_k = req.top_k or cfg.default_top_k
-    neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
-    options = RetrievalOptions.from_settings(cfg, mode=req.mode, fusion=req.fusion)
-    started = time.perf_counter()
-    call = CacheCall(
-        get_cache(cfg), bypass=wants_bypass(req.cache, request.headers.get("cache-control"))
+    rt = RequestTrace.start(
+        cfg, request, top_k=req.top_k, mode=req.mode, fusion=req.fusion, cache=req.cache
     )
-    outcome: dict[str, Any] = {
-        "status": "error",
-        "error": None,
-        "hits": None,
-        "prompt": None,
-        "completion": None,
-        "cost": None,
-        "cited": [],
-        "embedding": None,
-        "ttft_ms": None,
-        "cancelled": False,
-    }
+    neighbors = cfg.retrieval_neighbors if req.neighbors is None else req.neighbors
+    call = rt.call
 
     async def record() -> uuid.UUID | None:
-        return await traces.record(
+        return await rt.record(
             session,
+            cfg,
+            principal,
             kind="chat",
-            status=outcome["status"],
-            duration_ms=int((time.perf_counter() - started) * 1000),
-            user_email=None if principal.anonymous else principal.email,
+            question=req.question,
             model=getattr(llm, "model", None),
-            prompt_tokens=outcome["prompt"],
-            completion_tokens=outcome["completion"],
-            hits=outcome["hits"],
-            cost_usd=outcome["cost"],
-            error=outcome["error"],
-            question=req.question if cfg.trace_capture_content else None,
-            meta={
-                "top_k": top_k,
-                "neighbors": neighbors,
-                "document_filter": len(req.document_ids or []),
-                "cited_document_ids": outcome["cited"],
-                **({"embedding": outcome["embedding"]} if outcome["embedding"] else {}),
-                "streamed": True,
-                "ttft_ms": outcome["ttft_ms"],
-                **({"cancelled": True} if outcome["cancelled"] else {}),
-                **({"cache": call.trace_meta("answer")} if call.active else {}),
-                **options.trace_meta(),
-            },
+            meta=rt.meta(
+                neighbors=neighbors,
+                document_ids=req.document_ids,
+                layer="answer",
+                lead={"cited_document_ids": rt.cited},
+                mid={
+                    "streamed": True,
+                    "ttft_ms": rt.ttft_ms,
+                    **({"cancelled": True} if rt.cancelled else {}),
+                },
+            ),
         )
 
     try:
         with (
             log_context(chat_id=uuid.uuid4().hex, question_chars=len(req.question)),
             observability.span(
-                "chat.retrieve", input=req.question, top_k=top_k, retrieval_mode=options.mode
+                "chat.retrieve", input=req.question, top_k=rt.top_k, retrieval_mode=rt.options.mode
             ),
         ):
-            with measure_embeddings() as meter:
-                retrieval = await retrieve_ranked(
-                    req.question,
-                    top_k=top_k,
-                    neighbors=neighbors,
-                    options=options,
-                    document_ids=req.document_ids,
-                    embedder=embedder,
-                    store=store,
-                    session=session,
-                    span_prefix="chat",
-                    cache=call,
-                )
-            outcome["hits"] = len(retrieval.hits)
-            outcome["embedding"] = embedding_usage(meter, call, options.mode)
+            retrieval = await retrieve_for_request(
+                rt,
+                req.question,
+                neighbors=neighbors,
+                document_ids=req.document_ids,
+                embedder=embedder,
+                store=store,
+                session=session,
+                span_prefix="chat",
+            )
             prep = await prepare_stream(req.question, retrieval.passages, llm, cache=call)
     except LLMError as exc:
         logger.warning("llm_unavailable", error=str(exc))
-        err = _llm_http_error(exc)
-        outcome["error"] = str(err.detail)
+        err = llm_http_error(exc)
+        rt.fail(err)
         await record()
         raise err from exc
-    except HTTPException as exc:
-        outcome["error"] = str(exc.detail)
-        await record()
-        raise
     except Exception as exc:
-        outcome["error"] = f"{type(exc).__name__}: {exc}"
+        rt.fail(exc)
         await record()
         raise
 
@@ -347,21 +250,21 @@ async def chat_stream(
                 with observability.span("chat.answer", sources=len(sources), streamed=True):
                     async for item in stream_answer(prep):
                         if isinstance(item, str):
-                            if outcome["ttft_ms"] is None:
-                                outcome["ttft_ms"] = int((time.perf_counter() - started) * 1000)
+                            if rt.ttft_ms is None:
+                                rt.ttft_ms = rt.elapsed_ms()
                             yield sse("token", {"text": item})
                         else:
                             result = item
             except Exception as exc:
                 if isinstance(exc, LLMError):
                     logger.warning("llm_stream_failed", error=str(exc))
-                    code = 502 if isinstance(exc, LLMRequestError) else 503
-                    detail = str(exc)
+                    err = llm_http_error(exc)
+                    code, detail = err.status_code, str(err.detail)
                 else:
                     logger.exception("chat_stream_failed")
                     code, detail = 500, "internal error while streaming the answer"
-                _keep_usage(outcome, exc)
-                outcome["error"] = f"{type(exc).__name__}: {exc}"
+                rt.keep_usage(exc)
+                rt.fail(exc)
                 recorded = True
                 trace_id = await record()
                 yield sse(
@@ -374,16 +277,10 @@ async def chat_stream(
                 )
                 return
             assert result is not None
-            outcome.update(
-                status="ok",
-                prompt=result.prompt_tokens,
-                completion=result.completion_tokens,
-                cost=result.cost_usd,
-                cited=list(dict.fromkeys(str(c.document_id) for c in result.sources if c.is_hit)),
-            )
+            rt.succeed(result)
             recorded = True
             trace_id = await record()
-            logger.info("chat_streamed", sources=len(sources), ttft_ms=outcome["ttft_ms"])
+            logger.info("chat_streamed", sources=len(sources), ttft_ms=rt.ttft_ms)
             yield sse(
                 "done",
                 {
@@ -399,8 +296,8 @@ async def chat_stream(
             )
         except (asyncio.CancelledError, GeneratorExit):
             # the client went away: aiter_stream closes the upstream call, nothing was cached
-            outcome["error"] = "client_disconnected"
-            outcome["cancelled"] = True
+            rt.error = "client_disconnected"
+            rt.cancelled = True
             raise
         finally:
             if not recorded:
