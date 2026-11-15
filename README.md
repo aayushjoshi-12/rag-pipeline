@@ -68,7 +68,7 @@ make up
 
 Open the dashboard at http://localhost:5173 (API docs at http://localhost:8000/docs), sign in with your admin, then **Admin > Settings**: add your LLM provider key and click "Test connection". Upload a document on **Documents**, wait for `ready`, and ask a question on **Chat**. `make down` stops the stack and keeps your data.
 
-**(b) Published images** (no build toolchain; available after the first release is published):
+**(b) Published images** (no build toolchain; `v0.1.0` images for linux/amd64 and linux/arm64 are on GHCR):
 
 ```bash
 git clone https://github.com/aayushjoshi-12/rag-pipeline.git && cd rag-pipeline
@@ -165,7 +165,7 @@ Verified means observed on a running stack with real dependencies; the full tabl
 | Kubernetes on kind (all pods, migrations, login, ingest, chat, HPA 2 -> 8, pod-delete survival, S3 mode) | Verified on kind, arm64 images |
 | Compose-from-clean-clone and local image build and run | Verified on Apple Silicon (arm64) |
 | Vision parsing of scanned pages with a live provider call | Partial: passed in earlier runs, not re-run after the switch to pypdfium2 |
-| amd64 images and the release workflow (multi-arch build, GHCR push, attestation) | Not yet run on GitHub CI; the amd64 backend build was not completed locally |
+| Release workflow and published images (v0.1.0) | Ran on GitHub: multi-arch (amd64 + arm64) images built, Trivy-scanned, pushed to GHCR with a verified SLSA provenance attestation; the published images were pulled anonymously and run (login, ingest, all three search modes, dashboard and API proxy). Its last step failed once because the release had been created by hand (fixed) |
 | In-cluster Ollama, a real ReadWriteMany storage class, the untrimmed `prod` replica counts | Not run |
 | Worker throughput with many workers, Chroma beyond ~3k vectors per collection | Not measured |
 | Retrieval quality | Measured on one corpus with 12 labelled questions: hybrid did not beat keyword-only there. Treat as indicative |
