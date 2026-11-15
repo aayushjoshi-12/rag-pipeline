@@ -49,6 +49,11 @@ RAG_VERSION=0.1.0 docker compose -f docker-compose.image.yml up -d
 - Knobs: `RAG_VERSION` (default `latest`), `RAG_IMAGE_REGISTRY` (default `ghcr.io/aayushjoshi-12`, e.g. to use a
   mirror or a fork), `RAG_ENV_FILE`, and host ports `RAG_API_PORT`, `RAG_UI_PORT`, `RAG_DB_PORT`, `RAG_REDIS_PORT`,
   `RAG_CHROMA_PORT`.
+- If you keep the settings in a file other than `.env`, set `RAG_ENV_FILE` **and** pass the same file to Compose for variable
+  substitution (`docker compose --env-file my.env -f docker-compose.image.yml up -d`); otherwise the admin account in
+  `ADMIN_EMAIL` / `ADMIN_PASSWORD` is substituted as empty and nobody can sign in. With the default `.env` this is automatic.
+- After recreating only the API container, restart the frontend too (`docker compose ... restart frontend`): nginx keeps the
+  API's old address until it restarts.
 - Stop with `make down-image` (volumes are kept; add `-v` to `docker compose ... down` only to delete your data).
 
 ## Required secrets
