@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import { Icon } from '../components/Icon'
 import { Alert, Card, EmptyState, PageHeader } from '../components/ui'
 import type { Trace } from '../types'
+import { costCell, tokensCell, type UsageCell } from './traceUsage'
 
 const PAGE = 25
 const META_CHIPS: [key: string, label: string][] = [
@@ -49,6 +50,18 @@ function MetaDetails({ meta }: { meta: Record<string, unknown> }) {
   )
 }
 
+function UsageValue({ cell }: { cell: UsageCell }) {
+  return (
+    <span
+      title={cell.title}
+      className={cell.kind === 'known' ? undefined : 'muted'}
+      data-usage={cell.kind}
+    >
+      {cell.text}
+    </span>
+  )
+}
+
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 export default function TracesPage() {
@@ -79,16 +92,11 @@ export default function TracesPage() {
     }
   }, [kind, status, offset])
 
-  const tokens = (t: Trace): string =>
-    t.prompt_tokens === null && t.completion_tokens === null
-      ? '—'
-      : `${t.prompt_tokens ?? 0} / ${t.completion_tokens ?? 0}`
-
   return (
     <div className="stack">
       <PageHeader
         title="Traces"
-        description="Every chat, search and ingest request, with timing, token use and errors."
+        description="Every chat, search and ingest request, with timing, token use, cost and errors."
       />
       <div className="toolbar">
         <label className="field field-inline">
@@ -131,7 +139,7 @@ export default function TracesPage() {
           </EmptyState>
         ) : (
           <div className="table-wrap">
-            <table className="table">
+            <table className="table traces-table">
               <thead>
                 <tr>
                   <th>Time</th>
@@ -141,6 +149,7 @@ export default function TracesPage() {
                   <th>Model</th>
                   <th className="num-col">Duration</th>
                   <th className="num-col">Tokens (in / out)</th>
+                  <th className="num-col">Cost</th>
                   <th className="num-col">Hits</th>
                 </tr>
               </thead>
@@ -176,12 +185,17 @@ export default function TracesPage() {
                         {t.model ?? '—'}
                       </td>
                       <td className="num-col nowrap">{t.duration_ms.toLocaleString()} ms</td>
-                      <td className="num-col nowrap">{tokens(t)}</td>
+                      <td className="num-col nowrap">
+                        <UsageValue cell={tokensCell(t)} />
+                      </td>
+                      <td className="num-col nowrap">
+                        <UsageValue cell={costCell(t)} />
+                      </td>
                       <td className="num-col">{t.hits ?? '—'}</td>
                     </tr>
                     {open === t.id && (
                       <tr className="detail-row">
-                        <td colSpan={8}>
+                        <td colSpan={9}>
                           <dl className="detail-list">
                             {t.error && (
                               <>

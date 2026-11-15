@@ -30,7 +30,7 @@ from app.services.cache import (
     normalize_query,
 )
 from app.services.context import add_neighbor_context
-from app.services.embeddings import Embedder
+from app.services.embeddings import Embedder, EmbeddingMeter
 from app.services.keyword import KeywordIndexMismatchError
 from app.services.retriever import ChunkResult, RetrievalOptions, retrieve
 from app.services.vectorstore import VectorStore, VectorStoreMismatchError
@@ -49,6 +49,19 @@ class Retrieval:
         """The context chunks that accompany ``hit`` (document order, unscored)."""
         key = (hit.document_id, hit.chunk_index)
         return [p for p in self.passages if p.context_for == key]
+
+
+def embedding_usage(meter: EmbeddingMeter, call: CacheCall, mode: str) -> dict[str, Any] | None:
+    """Query-embedding usage for a trace: ``{tokens, cached?}``, or ``None`` when nothing is known/applicable.
+
+    A cache hit (embedding or retrieval layer) means no provider call happened: 0 tokens, marked cached."""
+    if mode == "keyword":
+        return None
+    if call.embeddings_avoided:
+        return {"tokens": 0, "cached": True}
+    if meter.tokens is not None:
+        return {"tokens": meter.tokens}
+    return None
 
 
 @contextmanager

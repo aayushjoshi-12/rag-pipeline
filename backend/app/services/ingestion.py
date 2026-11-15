@@ -26,7 +26,7 @@ from app.db.models import Document
 from app.observability import log_context
 from app.services import cache, observability, traces
 from app.services.chunking import ChunkSpec, chunk_text
-from app.services.embeddings import Embedder
+from app.services.embeddings import Embedder, embedding_cost, measure_embeddings
 from app.services.fetcher import Fetched, fetch_to_storage
 from app.services.incremental import old_chunks_from_rows, plan_update, vector_id
 from app.services.parser import ParseResult
@@ -106,6 +106,9 @@ async def _record_trace(
     job_id: uuid.UUID, status: JobStatus, started: float, session: AsyncSession, settings: Settings
 ) -> None:
     job = await ops.get_job(job_id, session=session)
+    stats = dict(job.stats or {}) if job else {}
+    reported = stats.get("embedding_tokens")
+    tokens = reported if isinstance(reported, int) else None
     await traces.record(
         session,
         kind="ingest",
@@ -113,8 +116,11 @@ async def _record_trace(
         duration_ms=int((time.perf_counter() - started) * 1000),
         document_id=job.document_id if job else None,
         model=settings.embedding_model,
+        prompt_tokens=tokens,
+        completion_tokens=0 if tokens is not None else None,
+        cost_usd=embedding_cost(settings, tokens),
         error=job.error if job else None,
-        meta=dict(job.stats or {}) if job else {},
+        meta=stats,
     )
 
 
@@ -209,10 +215,15 @@ async def _ingest(
         # Embed only the vectors that are new (a full rebuild "adds" everything).
         add_specs = [first_spec[h] for h in plan.add_hashes]
         vectors: list[list[float]] = []
-        with observability.span("ingest.embed", chunks=len(add_specs), mode=plan.mode):
+        with (
+            observability.span("ingest.embed", chunks=len(add_specs), mode=plan.mode),
+            measure_embeddings() as meter,
+        ):
             for i in range(0, len(add_specs), _EMBED_BATCH):
                 batch = [c.text for c in add_specs[i : i + _EMBED_BATCH]]
                 vectors.extend(await asyncio.to_thread(embedder.embed_documents, batch))
+        # nothing re-embedded = a real 0; otherwise only what the provider reported (None = unknown)
+        embedding_tokens = meter.tokens if add_specs else 0
 
         def meta(c: ChunkSpec) -> dict[str, Any]:
             return {
@@ -283,6 +294,7 @@ async def _ingest(
             "added": len(plan.add_hashes),
             "removed": len(plan.remove_hashes),
             "embedded": len(add_specs),
+            **({"embedding_tokens": embedding_tokens} if embedding_tokens is not None else {}),
         }
         await ops.update_job_status(job_id, JobStatus.DONE, stats=stats, session=session)
         await ops.update_document_status(doc_id, DocumentStatus.READY, session=session)

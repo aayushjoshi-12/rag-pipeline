@@ -62,3 +62,20 @@ class FakeStore:
 
     def texts_for(self, doc_id: str) -> set[str]:
         return {v["text"] for v in self.vectors.values() if v["metadata"]["doc_id"] == doc_id}
+
+
+class MeteredEmbedder(FakeEmbedder):
+    """A FakeEmbedder that reports provider usage like the real Ollama/OpenAI embedders (10 tokens per text)."""
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        from app.services.embeddings import _report
+
+        out = super().embed_documents(texts)
+        _report(10 * len(texts))
+        return out
+
+    def embed_query(self, text: str) -> list[float]:
+        from app.services.embeddings import _report
+
+        _report(10)
+        return super().embed_query(text)

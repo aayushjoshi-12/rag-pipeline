@@ -227,7 +227,7 @@ Secret fields (K8s Secret / `.env`-owned): provider keys (`OPENROUTER_API_KEY` d
 Non-secret tunables (JSON-owned): `RAG_ENV`, `PORT`, `LOG_LEVEL`, `EMBEDDING_PROVIDER`,
 `EMBEDDING_MODEL`, `OLLAMA_BASE_URL`, `LLM_PROVIDER`,
 `DEFAULT_LLM_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `VECTOR_STORE`, `DEFAULT_TOP_K`,
-`MAX_UPLOAD_SIZE_BYTES`, `LLM_MAX_TOKENS` (once ticket 40 lands), `CACHE_*` (query cache, ADR-0004), `CORS_ALLOW_ORIGINS`,
+`MAX_UPLOAD_SIZE_BYTES`, `LLM_MAX_TOKENS`, `EMBEDDING_PRICE_PER_MTOK`, `CACHE_*` (query cache, ADR-0004), `CORS_ALLOW_ORIGINS`,
 `RETRIEVAL_*`, `VECTOR_*`/`HNSW_*`, `STORAGE_BACKEND`/`S3_*` (the S3 keys are secrets), plus all `PARSER_*` / `OPENROUTER_BASE_URL` / `PDF_DPI` / `OCR_LANG`
 / `DOCX_READER` parse knobs (see ADR-0002).
 

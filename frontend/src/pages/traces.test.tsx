@@ -146,6 +146,41 @@ describe('Traces page', () => {
     expect(screen.getAllByText('1,234 ms')).toHaveLength(2)
   })
 
+  it('distinguishes cached, n/a and real numbers in the table, with explanatory titles', async () => {
+    m.listTraces.mockResolvedValue({
+      items: [
+        trace({
+          id: 'a',
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          cost_usd: 0,
+          meta: { cache: { answer: 'hit' } },
+        }),
+        trace({ id: 'b', prompt_tokens: null, completion_tokens: null, cost_usd: null }),
+        trace({
+          id: 'c',
+          prompt_tokens: 2500,
+          completion_tokens: 2048,
+          cost_usd: 0.00011,
+          status: 'error',
+          error: 'x',
+        }),
+      ],
+      total: 3,
+    })
+    renderAt('/traces')
+    expect(await screen.findByText('cached')).toHaveAttribute(
+      'title',
+      expect.stringMatching(/cache/),
+    )
+    const na = screen.getAllByText('n/a')
+    expect(na).toHaveLength(2) // tokens and cost
+    expect(na[0]).toHaveAttribute('title', expect.stringMatching(/provider returned no count/))
+    expect(screen.getByText('2,500 / 2,048')).toBeInTheDocument()
+    expect(screen.getByText('$0.00011')).toBeInTheDocument()
+    expect(screen.getByRole('columnheader', { name: 'Cost' })).toBeInTheDocument()
+  })
+
   it('expands a row to show the error and details', async () => {
     m.listTraces.mockResolvedValue({
       items: [

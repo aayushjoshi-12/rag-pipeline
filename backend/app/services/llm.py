@@ -16,8 +16,24 @@ from app.config import Settings
 from app.services import observability
 
 
+@dataclass(frozen=True)
+class Usage:
+    """What the provider reported (and billed) for a call, kept even when the call failed."""
+
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    cost_usd: float | None = None
+
+
 class LLMError(Exception):
-    """Base class for LLM call failures."""
+    """Base class for LLM call failures.
+
+    ``usage`` is what the provider reported for the failed call (a reasoning model that spent its whole
+    output budget thinking is still billed), or ``None`` when it reported nothing."""
+
+    def __init__(self, message: str = "", usage: Usage | None = None) -> None:
+        super().__init__(message)
+        self.usage = usage
 
 
 class LLMUnavailableError(LLMError):
@@ -83,6 +99,16 @@ class LLM(Protocol):
         ignore it, but it gives ``aiter_stream`` a chance to cancel. Closing the generator closes the upstream
         HTTP stream."""
         ...
+
+
+def empty_answer_message(out_of_tokens: bool, max_tokens: int) -> str:
+    """The error for a reply without text; names the real cause when the output budget ran out."""
+    if out_of_tokens:
+        return (
+            f"LLM ran out of output tokens (finish_reason=length, max_tokens={max_tokens}) before "
+            "writing an answer; raise LLM_MAX_TOKENS or use a non-reasoning model."
+        )
+    return "LLM returned an empty answer"
 
 
 def _map_openai_error(exc: Exception) -> LLMError:
@@ -189,6 +215,19 @@ class OpenAICompatLLM:
             http_client=http_client,
         )
 
+    def _usage(self, usage: Any) -> Usage | None:
+        """Tokens and cost of a (possibly failed) call from the provider's ``usage`` block."""
+        if usage is None:
+            return None
+        prompt = getattr(usage, "prompt_tokens", None)
+        completion = getattr(usage, "completion_tokens", None)
+        cost = parse_reported_cost(usage) if self.report_cost else None
+        if cost is None:
+            cost = price_tokens(
+                prompt, completion, self.price_input_per_mtok, self.price_output_per_mtok
+            )
+        return Usage(prompt, completion, cost)
+
     def complete(self, system: str, user: str) -> Completion:
         with observability.generation("llm.chat", model=self.model, input=user) as gen:
             try:
@@ -208,10 +247,17 @@ class OpenAICompatLLM:
                     raise LLMUnavailableError(f"LLM provider returned {exc.status_code}") from exc
                 raise LLMRequestError(f"LLM provider returned {exc.status_code}") from exc
             if not resp.choices:
-                raise LLMUnavailableError("LLM returned no completion choices")
+                raise LLMUnavailableError(
+                    "LLM returned no completion choices", usage=self._usage(resp.usage)
+                )
             text = resp.choices[0].message.content
             if not text or not text.strip():
-                raise LLMUnavailableError("LLM returned an empty answer")
+                raise LLMUnavailableError(
+                    empty_answer_message(
+                        resp.choices[0].finish_reason == "length", self.max_tokens
+                    ),
+                    usage=self._usage(resp.usage),
+                )
             usage = resp.usage
             gen.update(
                 output=observability.maybe_content(text),
@@ -234,6 +280,7 @@ class OpenAICompatLLM:
         with observability.generation("llm.chat", model=self.model, input=user) as gen:
             parts: list[str] = []
             usage: Any = None
+            finish: str | None = None
             try:
                 resp = self._client.chat.completions.create(
                     model=self.model,
@@ -250,10 +297,13 @@ class OpenAICompatLLM:
                     for chunk in resp:
                         err = (getattr(chunk, "model_extra", None) or {}).get("error")
                         if err:  # OpenRouter reports mid-stream failures in-band
-                            raise LLMUnavailableError(f"LLM stream failed: {err}")
+                            raise LLMUnavailableError(
+                                f"LLM stream failed: {err}", usage=self._usage(usage)
+                            )
                         if chunk.usage is not None:
                             usage = chunk.usage
                         if chunk.choices:
+                            finish = chunk.choices[0].finish_reason or finish
                             delta = chunk.choices[0].delta.content
                             if delta:
                                 parts.append(delta)
@@ -261,22 +311,23 @@ class OpenAICompatLLM:
                             # and a cancel can only take effect when the generator yields
                             yield delta or ""
             except openai.APIError as exc:
-                raise _map_openai_error(exc) from exc
+                mapped = _map_openai_error(exc)
+                mapped.usage = self._usage(usage)
+                raise mapped from exc
             text = "".join(parts)
             if not text.strip():
-                raise LLMUnavailableError("LLM returned an empty answer")
-            prompt = usage.prompt_tokens if usage else None
-            completion = usage.completion_tokens if usage else None
+                raise LLMUnavailableError(
+                    empty_answer_message(finish == "length", self.max_tokens),
+                    usage=self._usage(usage),
+                )
+            used = self._usage(usage) or Usage()
             gen.update(
                 output=observability.maybe_content(text),
-                usage_details=observability.usage_details(prompt, completion),
+                usage_details=observability.usage_details(
+                    used.prompt_tokens, used.completion_tokens
+                ),
             )
-            cost = parse_reported_cost(usage) if self.report_cost else None
-            if cost is None:
-                cost = price_tokens(
-                    prompt, completion, self.price_input_per_mtok, self.price_output_per_mtok
-                )
-            yield Completion(text, prompt, completion, cost)
+            yield Completion(text, used.prompt_tokens, used.completion_tokens, used.cost_usd)
 
 
 class AnthropicLLM:
@@ -298,6 +349,16 @@ class AnthropicLLM:
             api_key=api_key, timeout=timeout_seconds, max_retries=0, http_client=http_client
         )
 
+    def _usage(self, usage: Any) -> Usage | None:
+        if usage is None:
+            return None
+        prompt, completion = usage.input_tokens, usage.output_tokens
+        return Usage(
+            prompt,
+            completion,
+            price_tokens(prompt, completion, self.price_input_per_mtok, self.price_output_per_mtok),
+        )
+
     def complete(self, system: str, user: str) -> Completion:
         with observability.generation("llm.chat", model=self.model, input=user) as gen:
             try:
@@ -315,7 +376,10 @@ class AnthropicLLM:
                 raise LLMRequestError(f"LLM provider returned {exc.status_code}") from exc
             text = "".join(b.text for b in resp.content if b.type == "text")
             if not text.strip():
-                raise LLMUnavailableError("LLM returned an empty answer")
+                raise LLMUnavailableError(
+                    empty_answer_message(resp.stop_reason == "max_tokens", self.max_tokens),
+                    usage=self._usage(resp.usage),
+                )
             gen.update(
                 output=observability.maybe_content(text),
                 usage_details=observability.usage_details(
@@ -353,7 +417,10 @@ class AnthropicLLM:
                 raise LLMRequestError(f"LLM provider returned {exc.status_code}") from exc
             text = "".join(parts)
             if not text.strip():
-                raise LLMUnavailableError("LLM returned an empty answer")
+                raise LLMUnavailableError(
+                    empty_answer_message(final.stop_reason == "max_tokens", self.max_tokens),
+                    usage=self._usage(final.usage),
+                )
             gen.update(
                 output=observability.maybe_content(text),
                 usage_details=observability.usage_details(
@@ -380,6 +447,7 @@ def get_llm(settings: Settings | None = None) -> LLM:
             cfg.openrouter_api_key,
             model,
             base_url=cfg.openrouter_base_url,
+            max_tokens=cfg.llm_max_tokens,
             report_cost=True,
             price_input_per_mtok=cfg.llm_price_input_per_mtok,
             price_output_per_mtok=cfg.llm_price_output_per_mtok,
@@ -390,6 +458,7 @@ def get_llm(settings: Settings | None = None) -> LLM:
         return OpenAICompatLLM(
             cfg.openai_api_key,
             model,
+            max_tokens=cfg.llm_max_tokens,
             price_input_per_mtok=cfg.llm_price_input_per_mtok,
             price_output_per_mtok=cfg.llm_price_output_per_mtok,
         )
@@ -399,6 +468,7 @@ def get_llm(settings: Settings | None = None) -> LLM:
         return AnthropicLLM(
             cfg.anthropic_api_key,
             model,
+            max_tokens=cfg.llm_max_tokens,
             price_input_per_mtok=cfg.llm_price_input_per_mtok,
             price_output_per_mtok=cfg.llm_price_output_per_mtok,
         )

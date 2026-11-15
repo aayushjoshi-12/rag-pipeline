@@ -15,9 +15,9 @@ from app.schema.search import ContextChunk, SearchRequest, SearchResponse, Searc
 from app.services import traces
 from app.services.auth.permissions import Permission
 from app.services.cache import CacheCall, get_cache, wants_bypass
-from app.services.embeddings import Embedder
+from app.services.embeddings import Embedder, embedding_cost, measure_embeddings
 from app.services.retriever import RetrievalOptions
-from app.services.search import retrieve_ranked
+from app.services.search import embedding_usage, retrieve_ranked
 from app.services.vectorstore import VectorStore
 
 logger = structlog.get_logger(__name__)
@@ -64,9 +64,9 @@ async def search(
     call = CacheCall(
         get_cache(cfg), bypass=wants_bypass(req.cache, request.headers.get("cache-control"))
     )
-    outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None}
+    outcome: dict[str, Any] = {"status": "error", "error": None, "hits": None, "embedding": None}
     try:
-        with log_context(question_chars=len(req.query)):
+        with log_context(question_chars=len(req.query)), measure_embeddings() as meter:
             retrieval = await retrieve_ranked(
                 req.query,
                 top_k=top_k,
@@ -79,7 +79,11 @@ async def search(
                 span_prefix="search",
                 cache=call,
             )
-        outcome.update(status="ok", hits=len(retrieval.hits))
+        outcome.update(
+            status="ok",
+            hits=len(retrieval.hits),
+            embedding=embedding_usage(meter, call, options.mode),
+        )
         results = [
             SearchResult(
                 rank=h.rank or 0,
@@ -123,6 +127,7 @@ async def search(
         outcome["error"] = f"{type(exc).__name__}: {exc}"
         raise
     finally:
+        emb = outcome["embedding"]
         await traces.record(
             session,
             kind="search",
@@ -130,6 +135,9 @@ async def search(
             duration_ms=int((time.perf_counter() - started) * 1000),
             user_email=None if principal.anonymous else principal.email,
             hits=outcome["hits"],
+            prompt_tokens=emb["tokens"] if emb else None,
+            completion_tokens=0 if emb else None,
+            cost_usd=embedding_cost(cfg, emb["tokens"]) if emb else None,
             error=outcome["error"],
             question=req.query if cfg.trace_capture_content else None,
             meta={
@@ -137,6 +145,7 @@ async def search(
                 "neighbors": req.neighbors,
                 "document_filter": len(req.document_ids or []),
                 "include_text": req.include_text,
+                **({"embedding": emb} if emb else {}),
                 **({"cache": call.trace_meta("retrieval")} if call.active else {}),
                 **options.trace_meta(),
             },

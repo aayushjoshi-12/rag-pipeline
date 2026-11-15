@@ -27,7 +27,7 @@ from app.schema.chat import ChatRequest, ChatResponse, ChunkRef, SourceOut
 from app.services import observability, traces
 from app.services.auth.permissions import Permission
 from app.services.cache import CacheCall, get_cache, wants_bypass
-from app.services.embeddings import Embedder
+from app.services.embeddings import Embedder, measure_embeddings
 from app.services.llm import (
     LLM,
     LLMConfigError,
@@ -37,7 +37,7 @@ from app.services.llm import (
 )
 from app.services.qa import Answer, answer_question, prepare_stream, stream_answer
 from app.services.retriever import ChunkResult, RetrievalOptions
-from app.services.search import retrieve_ranked
+from app.services.search import embedding_usage, retrieve_ranked
 from app.services.vectorstore import VectorStore
 
 logger = structlog.get_logger(__name__)
@@ -71,6 +71,7 @@ async def chat(
         "completion": None,
         "cost": None,
         "cited": [],
+        "embedding": None,
     }
     try:
         out = await _chat(
@@ -104,6 +105,7 @@ async def chat(
                 "document_filter": len(req.document_ids or []),
                 # ids only (never content): which documents the answer was grounded on
                 "cited_document_ids": outcome["cited"],
+                **({"embedding": outcome["embedding"]} if outcome["embedding"] else {}),
                 **({"cache": call.trace_meta("answer")} if call.active else {}),
                 **options.trace_meta(),
             },
@@ -133,28 +135,32 @@ async def _chat(
             retrieval_mode=options.mode,
         ) as root,
     ):
-        retrieval = await retrieve_ranked(
-            req.question,
-            top_k=top_k,
-            neighbors=neighbors,
-            options=options,
-            document_ids=req.document_ids,
-            embedder=embedder,
-            store=store,
-            session=session,
-            span_prefix="chat",
-            cache=call,
-        )
+        with measure_embeddings() as meter:
+            retrieval = await retrieve_ranked(
+                req.question,
+                top_k=top_k,
+                neighbors=neighbors,
+                options=options,
+                document_ids=req.document_ids,
+                embedder=embedder,
+                store=store,
+                session=session,
+                span_prefix="chat",
+                cache=call,
+            )
         chunks = retrieval.passages
         outcome["hits"] = len(retrieval.hits)
+        outcome["embedding"] = embedding_usage(meter, call, options.mode)
 
         try:
             with observability.span("chat.answer", sources=len(chunks)):
                 result = await answer_question(req.question, chunks, llm, cache=call)
         except (LLMUnavailableError, LLMConfigError) as exc:
+            _keep_usage(outcome, exc)
             logger.warning("llm_unavailable", error=str(exc))
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
         except LLMRequestError as exc:
+            _keep_usage(outcome, exc)
             logger.warning("llm_rejected", error=str(exc))
             raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(exc)) from exc
 
@@ -174,6 +180,15 @@ async def _chat(
             cache=call.result("answer"),
             answer=result.answer,
             sources=[_source_out(c) for c in result.sources],
+        )
+
+
+def _keep_usage(outcome: dict[str, Any], exc: Exception) -> None:
+    """A failed LLM call may still have been billed: keep what the provider reported on the trace."""
+    usage = exc.usage if isinstance(exc, LLMError) else None
+    if usage is not None:
+        outcome.update(
+            prompt=usage.prompt_tokens, completion=usage.completion_tokens, cost=usage.cost_usd
         )
 
 
@@ -244,6 +259,7 @@ async def chat_stream(
         "completion": None,
         "cost": None,
         "cited": [],
+        "embedding": None,
         "ttft_ms": None,
         "cancelled": False,
     }
@@ -267,6 +283,7 @@ async def chat_stream(
                 "neighbors": neighbors,
                 "document_filter": len(req.document_ids or []),
                 "cited_document_ids": outcome["cited"],
+                **({"embedding": outcome["embedding"]} if outcome["embedding"] else {}),
                 "streamed": True,
                 "ttft_ms": outcome["ttft_ms"],
                 **({"cancelled": True} if outcome["cancelled"] else {}),
@@ -282,19 +299,21 @@ async def chat_stream(
                 "chat.retrieve", input=req.question, top_k=top_k, retrieval_mode=options.mode
             ),
         ):
-            retrieval = await retrieve_ranked(
-                req.question,
-                top_k=top_k,
-                neighbors=neighbors,
-                options=options,
-                document_ids=req.document_ids,
-                embedder=embedder,
-                store=store,
-                session=session,
-                span_prefix="chat",
-                cache=call,
-            )
+            with measure_embeddings() as meter:
+                retrieval = await retrieve_ranked(
+                    req.question,
+                    top_k=top_k,
+                    neighbors=neighbors,
+                    options=options,
+                    document_ids=req.document_ids,
+                    embedder=embedder,
+                    store=store,
+                    session=session,
+                    span_prefix="chat",
+                    cache=call,
+                )
             outcome["hits"] = len(retrieval.hits)
+            outcome["embedding"] = embedding_usage(meter, call, options.mode)
             prep = await prepare_stream(req.question, retrieval.passages, llm, cache=call)
     except LLMError as exc:
         logger.warning("llm_unavailable", error=str(exc))
@@ -341,6 +360,7 @@ async def chat_stream(
                 else:
                     logger.exception("chat_stream_failed")
                     code, detail = 500, "internal error while streaming the answer"
+                _keep_usage(outcome, exc)
                 outcome["error"] = f"{type(exc).__name__}: {exc}"
                 recorded = True
                 trace_id = await record()

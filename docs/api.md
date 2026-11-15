@@ -622,7 +622,10 @@ data: {"answer":"The standard requires [1].","usage":{"prompt_tokens":812,"compl
   (`status: error`, `error: client_disconnected`, `meta.cancelled: true`).
 - **Tracing / cost:** one `chat` trace row (with `meta.streamed: true` and `meta.ttft_ms`, the time to the first
   token) and one LLM generation per request, written when the stream ends. Prompt/completion tokens and the cost
-  are captured from the provider's final usage chunk (OpenRouter: `usage.include`), as on `/chat`.
+  are captured from the provider's final usage chunk (OpenRouter: `usage.include`), as on `/chat`. A failed call
+  (including an empty answer from a reasoning model that ran out of output tokens) keeps the usage the provider
+  reported on its `error` trace; `meta.embedding` (`{tokens, cached?}`) holds the query-embedding usage. These are
+  additive `meta` keys: the `/traces` schema is unchanged.
 - **Proxies:** the response sets `Cache-Control: no-cache` and `X-Accel-Buffering: no`; put no response buffering
   or compression middlebox in front of it, or tokens will arrive in bursts.
 - **Not included:** resumable streams (`Last-Event-ID`), WebSockets, streaming for `/search`.

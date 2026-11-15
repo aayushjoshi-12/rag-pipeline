@@ -318,8 +318,19 @@ Each chat trace stores `cost_usd` (USD). **Unknown is `NULL`, never 0**: the das
 
 - `LLM_PROVIDER=openrouter` needs no price settings: requests carry `usage: {include: true}` and OpenRouter returns the real cost in `usage.cost` (0 for `:free` models). The flag is sent only to OpenRouter.
 - A provider-reported cost always wins over the configured prices.
+- Usage is kept on **failed** calls too: a reasoning model that spends its whole output budget thinking is still billed, so the error trace carries the provider's tokens and cost. A client that disconnects mid-stream never receives the final usage chunk, so those traces have none.
 - `GET /usage/credits` (needs `traces:read`) reads the OpenRouter key balance (`GET /key`) server-side, caches it 60 s, and returns `available: false` with a reason for other providers, a missing key or an unreachable endpoint. The API key is never returned.
 - `GET /usage/insights?days=&kind=` returns the aggregates behind the Usage tabs (cost by model, latency histogram, error reasons, weekday/hour heatmap, no-hit rate, hits per query, most-cited documents, chunk reuse, ingest duration by mode). Chat traces store the ids (never the text) of the documents an answer was grounded on in `meta.cited_document_ids`.
+
+### Output budget (`LLM_MAX_TOKENS`) and embedding usage (tickets 40, 45)
+
+| Key | Values | Default | Scope | Meaning |
+|---|---|---|---|---|
+| `LLM_MAX_TOKENS` | int `1..200000` | `2048` | deployment (env or `config.json`) | Maximum output tokens of one answer, sent to every LLM provider. Reasoning models count their hidden thinking against it: too small and the reply is empty. The error then says "LLM ran out of output tokens (finish_reason=length, max_tokens=N)"; raise this value or use a non-reasoning model. |
+| `EMBEDDING_PRICE_PER_MTOK` | float `>= 0` | unset | deployment | USD per million embedded tokens for a **hosted** embedding provider (`EMBEDDING_PROVIDER=openai`). Local Ollama is always `$0`. Unset on a hosted provider = embedding cost unknown (`n/a` in Traces). |
+
+- Embedding tokens are what the provider reported (Ollama `prompt_eval_count`, OpenAI `usage.total_tokens`); nothing is estimated. A `search` trace records the query embedding (`prompt_tokens`, `completion_tokens = 0`, `meta.embedding.tokens`); a cached embedding or retrieval is `0` with `meta.embedding.cached = true`. A `chat` trace keeps the LLM's tokens and puts the query embedding in `meta.embedding` only. An `ingest` trace records the tokens of the chunks it embedded (`meta.embedding_tokens`; `0` when an incremental update re-embedded nothing). Keyword search embeds nothing and records none.
+- Traces table: a number is what the provider reported, `cached` means the cache answered (nothing was spent), `n/a` means a successful call without a reported count/price (old traces too), and `—` means not applicable (failed without usage, keyword search).
 <!-- end ticket 32 -->
 
 <!-- ===== Ticket 35: API keys ===== -->

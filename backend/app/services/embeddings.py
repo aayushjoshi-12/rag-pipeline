@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import contextvars
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Protocol, cast, runtime_checkable
 
 from app.config import Settings
@@ -37,6 +41,58 @@ def probe_dimension(embedder: Embedder) -> int:
     return len(embedder.embed_query("dimension probe"))
 
 
+class EmbeddingMeter:
+    """Sums the token counts the embedding provider reports during one request/job.
+
+    ``tokens`` stays ``None`` until a provider reports a count (fakes and providers without usage never do),
+    which is how "unknown" is told apart from a real 0. Thread-safe: embedding runs in worker threads."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.tokens: int | None = None
+
+    def add(self, tokens: int | None) -> None:
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
+            return
+        with self._lock:
+            self.tokens = (self.tokens or 0) + tokens
+
+
+_meter: contextvars.ContextVar[EmbeddingMeter | None] = contextvars.ContextVar(
+    "embedding_meter", default=None
+)
+
+
+@contextmanager
+def measure_embeddings() -> Iterator[EmbeddingMeter]:
+    """Collect the provider-reported usage of every embedding call made inside the block (also in
+    ``asyncio.to_thread`` workers, which inherit the context). The ``Embedder`` protocol is unchanged."""
+    meter = EmbeddingMeter()
+    token = _meter.set(meter)
+    try:
+        yield meter
+    finally:
+        _meter.reset(token)
+
+
+def _report(tokens: object) -> None:
+    meter = _meter.get()
+    if meter is not None and isinstance(tokens, int):
+        meter.add(tokens)
+
+
+def embedding_cost(settings: Settings, tokens: int | None) -> float | None:
+    """USD for ``tokens`` embedded: always 0.0 for local Ollama, priced by ``EMBEDDING_PRICE_PER_MTOK`` for a
+    hosted provider, else ``None`` (unknown, never 0)."""
+    if tokens is None:
+        return None
+    if settings.embedding_provider == "ollama":
+        return 0.0
+    if settings.embedding_price_per_mtok is None:
+        return None
+    return tokens * settings.embedding_price_per_mtok / 1_000_000
+
+
 @runtime_checkable
 class Embedder(Protocol):
     """Embedding provider interface — text in, vectors out."""
@@ -66,7 +122,9 @@ class OllamaEmbedder:
                 json={"model": self.model, "input": texts},
             )
             resp.raise_for_status()
-            return cast(list[list[float]], resp.json()["embeddings"])
+            body = resp.json()
+            _report(body.get("prompt_eval_count"))
+            return cast(list[list[float]], body["embeddings"])
 
     def embed_query(self, text: str) -> list[float]:
         return self.embed_documents([text])[0]
@@ -84,6 +142,7 @@ class OpenAIEmbedder:
 
         client = OpenAI(api_key=self._api_key)
         resp = client.embeddings.create(model=self.model, input=texts)
+        _report(getattr(resp.usage, "total_tokens", None))
         return [item.embedding for item in resp.data]
 
     def embed_query(self, text: str) -> list[float]:

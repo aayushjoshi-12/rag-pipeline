@@ -1099,6 +1099,14 @@ input.switch:checked::after {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Traces has nine columns: tighter cells so the cost and hits columns fit a laptop without scrolling */
+.traces-table th,
+.traces-table td {
+  padding-inline: var(--s-2);
+}
+.traces-table .cell-trunc {
+  max-width: 7.25rem;
+}
 .file-link {
   display: flex;
   align-items: center;
@@ -1304,11 +1312,12 @@ input.switch:checked::after {
 }
 .kpi-value {
   margin-top: var(--s-1);
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 650;
   letter-spacing: -0.02em;
   line-height: 1.2;
-  overflow-wrap: anywhere;
+  /* tiny dollar amounts ($0.0000635) must never break mid-number */
+  white-space: nowrap;
 }
 .kpi-hint {
   margin-top: var(--s-1);

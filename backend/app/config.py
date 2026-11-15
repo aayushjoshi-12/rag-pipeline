@@ -283,11 +283,16 @@ class Settings(BaseSettings):
     # ── Chat/QA synthesis (OpenRouter default) ───────────────────────────────
     llm_provider: str = "openrouter"
     default_llm_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    #: Output-token budget of one answer (reasoning models spend it thinking, so too small = empty answer).
+    llm_max_tokens: int = 2048
     # ── LLM cost (ticket 32) ─────────────────────────────────────────────────
     #: USD per million tokens, used when the provider does not report a cost itself (OpenAI,
     #: Anthropic; OpenRouter reports it). Both must be set to price a call; unset = cost unknown.
     llm_price_input_per_mtok: float | None = None
     llm_price_output_per_mtok: float | None = None
+    #: USD per million embedded tokens for a hosted embedding provider (openai). Local ollama is always $0;
+    #: unset on a hosted provider = embedding cost unknown.
+    embedding_price_per_mtok: float | None = None
 
     # ── LLM provider keys (secrets) ──────────────────────────────────────────
     openrouter_api_key: str = ""
@@ -391,6 +396,10 @@ class Settings(BaseSettings):
             raise SettingsError(
                 "Set both llm_price_input_per_mtok and llm_price_output_per_mtok, or neither."
             )
+        if not 1 <= self.llm_max_tokens <= 200_000:
+            raise SettingsError("llm_max_tokens must be between 1 and 200000.")
+        if self.embedding_price_per_mtok is not None and self.embedding_price_per_mtok < 0:
+            raise SettingsError("embedding_price_per_mtok must be >= 0 (or unset).")
         if self.trace_retention_days < 1:
             raise SettingsError("trace_retention_days must be >= 1.")
         if self.cleanup_orphan_age_hours < 0:
