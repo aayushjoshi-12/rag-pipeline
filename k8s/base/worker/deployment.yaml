@@ -52,10 +52,10 @@ spec:
           resources:
             requests:
               cpu: 500m
-              memory: 1Gi
+              memory: 512Mi    # measured idle: ~445 MiB with WORKER_CONCURRENCY=2 (was ~1.1 GiB with Celery's default of one child per host CPU)
             limits:
               cpu: "2"
-              memory: 3Gi    # docling/PDF rendering is memory-hungry
+              memory: 3Gi    # headroom for DOCX (docling) and big PDFs; a 200-page scan renders one page at a time (~280 MiB peak)
       volumes:
         - name: uploads
           persistentVolumeClaim:

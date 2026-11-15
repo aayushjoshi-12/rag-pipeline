@@ -17,3 +17,10 @@ resources:
   - worker/deployment.yaml
   - beat/deployment.yaml
   - frontend/deployment.yaml
+
+configMapGenerator:
+  - name: chroma-config
+    files:
+      - config.yaml=chroma/config.yaml
+    options:
+      disableNameSuffixHash: true

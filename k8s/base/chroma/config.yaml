@@ -1,0 +1,13 @@
+# Chroma server config for Compose (mounted at /config.yaml) - the K8s copy is k8s/base/chroma/config.yaml
+# (a unit test keeps the two identical). Same persist_path as the image default.
+#
+# hnsw_index_pool_cache_config bounds how many HNSW indexes Chroma keeps in RAM. The default pool is effectively
+# unbounded and, measured on chroma 1.4.4 (ticket 48), a collection that was ever written to keeps ~3 MiB of
+# anonymous memory even after it is deleted: 400 create/add/delete cycles grew the server 16 MiB -> 1.2 GiB, and
+# every `reindex` (delete + recreate the collection) leaks one full index. With an LRU of 16 the same loop stays
+# near 0.1-0.2 MiB per cycle. Evicted indexes are reloaded from /data on the next query.
+persist_path: "/data"
+segment_manager:
+  hnsw_index_pool_cache_config:
+    lru:
+      capacity: 16

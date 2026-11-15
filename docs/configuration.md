@@ -55,6 +55,7 @@ fails at startup with the allowed values. **Scope** says when a change takes eff
 | `URL_INGEST_TOTAL_TIMEOUT_SECONDS` | `>= URL_INGEST_TIMEOUT_SECONDS`, `<= 3600` | `120` | deployment | Overall deadline of one download (defeats slow-drip servers). |
 | `URL_INGEST_MAX_REDIRECTS` | integer `0..20` | `5` | deployment | Redirect hops followed (each one is re-validated). |
 | `URL_INGEST_MAX_BYTES` | integer `>= 1` or unset | unset = `MAX_UPLOAD_SIZE_BYTES` | deployment | Download size cap, enforced on the bytes actually received. |
+| `WORKER_CONCURRENCY` | integer `1..64` | `2` | deployment (worker restart) | Celery prefork children per worker. Celery's own default is one per host CPU, which is the *node's* CPU count inside a K8s pod whatever its CPU limit; each child holds ~100 MiB private memory, so 10 children idled at ~1.1 GiB (2 children: ~445 MiB). Ingestion mostly waits on embedding/vision HTTP calls, so add worker replicas rather than children. See [Memory](#memory-and-limits). |
 
 Why these defaults: see "Parameter choice" in `docs/adr/0003-chunking.md`.
 
@@ -409,6 +410,35 @@ See [`docs/api.md`](./api.md#authentication-for-services-api-keys) for the secur
 
 Credentials are never allowed cross-origin (auth is by header), and the allowed methods/headers are fixed; see
 [`docs/api.md`](./api.md#cors-browser-clients). The dashboard container proxies `/api`-style calls itself, so it does not need this.
+
+## Memory and limits
+
+Measured on a 7.7 GiB Docker VM (tickets 48/49; raw numbers in `tmp/smoke_tests/48-49-memory-result.md`). The VM
+kernel log had shown global OOM kills of Chroma (5.7 GB and 5.5 GB resident) and of the api (3.3 GB): with no memory
+limit the kernel picks whichever process is biggest, not the one that ran away.
+
+| Service | Idle | What grows it | Compose | K8s request / limit |
+|---|---|---|---|---|
+| chroma | ~70 MiB (800 vectors) | vectors (~4x their raw float32 size, see rule), **every collection ever written to, even after it is deleted** | `mem_limit 1536m` | 512Mi / 1Gi |
+| api | ~160 MiB | uploads stream to disk in 1 MiB chunks (`MAX_UPLOAD_SIZE_BYTES`); ~275 MiB after three 200-page ingests | `mem_limit 1g` | 256Mi / 1Gi (prod 2Gi) |
+| worker | ~445 MiB at `WORKER_CONCURRENCY=2` (was ~1.1 GiB with Celery's default of one child per host CPU) | one ingest per child; after three 200-page text-PDF ingests (1827 chunks each) ~570 MiB (it creeps ~25 MiB per ingest, ticket 52), a 200-page *scanned* PDF ~280 MiB per process, a DOCX +45 MiB | `mem_limit 3g` | 512Mi / 3Gi (prod 4Gi) |
+
+* **Chroma sizing rule.** `memory ~= 150 MiB + 16 bytes x embedding dimension x vectors`. 512Mi/1Gi therefore holds about
+  40k vectors of 1024 dimensions; double the limit for every doubling. Vectors in Postgres are not part of this.
+* **Chroma leaks on delete (upstream, chroma 1.4.4).** A collection that was written to keeps its HNSW index in memory after
+  `delete_collection`, and deleting/re-adding vectors inside one collection keeps the old graph too: 10 `reindex` runs of
+  2768 x 1024 vectors grew the server 68 -> 236 MiB (~17 MiB per run, a full index each). Creating, writing and deleting
+  small collections in a loop cost ~3 MiB each with the default config and ~0.15 MiB with the bounded cache below.
+  The Compose and K8s Chroma therefore mount `chroma/config.yaml` (`hnsw_index_pool_cache_config.lru.capacity: 16`).
+  It fixes the many-small-collections case (tests, `CHROMA_COLLECTION` per tenant), **not** repeated reindexing of one big
+  collection: after a reindex or a mass delete, restart Chroma to return the memory (`docker compose restart chroma`,
+  `kubectl -n rag-pipeline rollout restart deploy/chroma`; the data is on the volume). With the memory limit set, the
+  worst case is that Chroma alone is OOM-killed and restarted, not a random service.
+* **Scanned PDFs.** Pages that need OCR/vision are rendered one at a time (`render_page`) and MuPDF's image cache is
+  shrunk after each page. Before, all pages were rendered up front: at the default `PDF_DPI=300` a 200-page scan needs
+  ~25 MB per page, about 4.4 GB, and was OOM-killed. `MAX_UPLOAD_SIZE_BYTES` (25 MiB) still bounds the file itself.
+* **Worker memory vs `WORKER_CONCURRENCY`.** Budget `~220 MiB + ~110 MiB x WORKER_CONCURRENCY` per worker, plus the
+  peak of the documents in flight; set the request to the idle figure and the limit to idle + one large document per child.
 
 ## Query cache
 

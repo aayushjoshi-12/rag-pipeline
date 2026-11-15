@@ -36,8 +36,30 @@ def extract_native_texts(path: Path) -> list[str]:
         return [str(page.get_text("text")) for page in doc]
 
 
+def page_count(path: Path) -> int:
+    """Number of pages (also validates that the file opens as a PDF). Renders nothing."""
+    with _RENDER_LOCK, pymupdf.open(str(path)) as doc:  # type: ignore[no-untyped-call]  # pymupdf ships no type hints
+        return int(doc.page_count)
+
+
+def render_page(path: Path, index: int, dpi: int) -> Image.Image:
+    """Render ONE zero-based page. The parser calls this per page and drops the image after the backend has
+    read it, so memory stays at one page (~25 MB at 300 dpi) instead of all pages at once (a 200-page scan
+    held ~5 GB and was OOM-killed; ticket 48)."""
+    if dpi <= 0:
+        raise ValueError("dpi must be positive")
+    with _RENDER_LOCK, pymupdf.open(str(path)) as doc:  # type: ignore[no-untyped-call]  # pymupdf ships no type hints
+        pix = doc.load_page(index).get_pixmap(dpi=dpi)
+        image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        # MuPDF keeps every decoded page image in a process-global store (up to 256 MB, then more across
+        # documents); without this a 60-page scan held ~600 MB RSS after rendering, flat at ~115 MB with it.
+        pymupdf.TOOLS.store_shrink(100)  # type: ignore[no-untyped-call]  # pymupdf ships no type hints
+        return image
+
+
 def render_pages(path: Path, indices: list[int], dpi: int) -> dict[int, Image.Image]:
-    """Render only the given zero-based pages (the ones that need OCR/vision)."""
+    """Render the given zero-based pages at once. Holds every image in memory: only for small page sets
+    (tests, previews); the parser uses ``render_page`` one page at a time."""
     if dpi <= 0:
         raise ValueError("dpi must be positive")
     wanted = set(indices)

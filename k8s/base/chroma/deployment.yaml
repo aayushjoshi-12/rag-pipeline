@@ -28,6 +28,14 @@ spec:
               # chromadb/chroma persists to /data (persist_path in the image's /config.yaml).
               # Mounting anywhere else silently loses every vector when the pod restarts.
               mountPath: /data
+            # Replaces the image's /config.yaml (same persist_path) to bound the HNSW index cache; without it
+            # Chroma keeps ~3 MiB per collection ever written to, even after deleting it (ticket 48).
+            - name: chroma-config
+              mountPath: /config.yaml
+              subPath: config.yaml
+              readOnly: true
+          # Sizing rule (docs/kubernetes-local.md): memory ~= 150 MiB + 16 bytes x dimension x vectors.
+          # 512Mi/1Gi covers ~40k vectors of 1024 dims; raise both for a bigger collection.
           resources:
             requests:
               cpu: 250m
@@ -36,6 +44,9 @@ spec:
               cpu: "1"
               memory: 1Gi
       volumes:
+        - name: chroma-config
+          configMap:
+            name: chroma-config
         - name: chroma-data
           persistentVolumeClaim:
             claimName: rag-pipeline-chroma-data

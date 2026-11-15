@@ -23,6 +23,7 @@ celery_app.conf.update(
     task_track_started=True,
     worker_prefetch_multiplier=1,
     task_acks_late=True,
+    worker_concurrency=_settings.worker_concurrency,
 )
 
 # Scheduled cleanup runs daily. The task bodies are stubs until their tickets land.

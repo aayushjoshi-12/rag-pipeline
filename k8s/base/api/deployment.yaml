@@ -69,18 +69,28 @@ spec:
               mountPath: /app/data
           # /health is 503 when db/redis/chroma are down: don't route traffic then (readiness),
           # but only restart on a hung process (liveness hits the same cheap endpoint with slack).
+          # /health also pings Ollama/Chroma/DB, so the default timeoutSeconds: 1 produced "context deadline
+          # exceeded" probe failures while a kind node was still pulling images (ticket 49): every probe sets 5 s,
+          # and the startupProbe gives a cold start up to 5 min (60 x 5 s) before liveness/readiness take over.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
-            initialDelaySeconds: 20
             periodSeconds: 20
+            timeoutSeconds: 5
             failureThreshold: 6
           securityContext:
             allowPrivilegeEscalation: false

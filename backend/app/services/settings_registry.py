@@ -419,6 +419,12 @@ REGISTRY: dict[str, Spec] = {
     "celery_result_backend": _s(
         "System", "Celery result backend URL.", apply="bootstrap", secret=True, reason=_DB
     ),
+    "worker_concurrency": _s(
+        "System",
+        "Celery child processes per worker (about 100 MiB each).",
+        apply="bootstrap",
+        reason="Read once when the worker process starts.",
+    ),
     "secret_key": _s(
         "System", "Token signing key.", apply="bootstrap", secret=True, reason=_LOCKOUT
     ),

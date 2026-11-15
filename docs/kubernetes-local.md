@@ -46,11 +46,17 @@ kind delete cluster --name rag-kind
   built-in roles and the bootstrap admin once at start-up, so it now has a `wait-for-migrate` init container (holds the
   pod until `alembic current` reports head). Without it, an api that won the race was Ready but nobody could log in
   (found on the 2026-11-15 run).
-- **Resources.** The full stack requests about 3 CPU / 3 GiB; a worker idles at about 1.1-1.3 GiB (limit 3 GiB). On an
-  8 GiB Docker VM that is shared with other containers, scaling workers beyond 2 starved the kind control plane
-  (API-server `TLS handshake timeout`, probe-driven restarts); stop other containers or give Docker 12+ GiB.
-  A global OOM kill of Chroma/uvicorn in the VM (not a cgroup limit) is the likely explanation of the one unexplained
-  `OOMKilled` api pod of the first run (ticket 48); in the 2026-11-15 run the api peaked at ~360 MiB under load, 0 restarts.
+- **Resources.** The full stack requests about 2.5 CPU / 2.2 GiB. A worker now idles at ~445 MiB (request 512Mi,
+  limit 3Gi): `WORKER_CONCURRENCY` defaults to 2 (Celery's own default is one child per *node* CPU, which put the
+  idle worker at 1.1-1.3 GiB, above its old 1 Gi request). On an 8 GiB Docker VM shared with other containers, scaling
+  workers beyond 2 starved the kind control plane (API-server `TLS handshake timeout`, probe-driven restarts); stop other
+  containers or give Docker 12+ GiB. Chroma sizing: `150 MiB + 16 bytes x dimension x vectors` (512Mi/1Gi = ~40k vectors
+  of 1024 dims); see `docs/configuration.md` "Memory and limits" for the measurements and the Chroma delete leak.
+  The old kernel-log OOM kills of Chroma (5.7 GB) and uvicorn (3.3 GB) were global VM kills, which kubelet reports as
+  `OOMKilled` for the one unexplained api pod of the first run (ticket 48).
+- **Probes.** The api has a `startupProbe` (up to 5 min) and 5 s timeouts on every probe: `/health` pings
+  db/redis/chroma/ollama and the 1 s default produced `context deadline exceeded` while the node pulled images.
+  Not yet re-verified on a throttled kind node (ticket 49).
 - **Uploads volume, single node.** kind's default StorageClass (`rancher.io/local-path`) is ReadWriteOnce and
   node-local; api and worker share the files because they are on the one node.
 - **Uploads volume, several nodes (measured on 2 worker nodes).** The local-path PV carries a node affinity, so the

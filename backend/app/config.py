@@ -11,7 +11,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pydantic import model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -325,6 +325,11 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/1"
+    #: Celery prefork child processes per worker. Celery's own default is the *host* CPU count (10 on a laptop,
+    #: and the node's count inside a K8s pod regardless of its CPU limit); each child holds ~100 MiB private
+    #: memory once the app is imported (ticket 49), so 10 children idle at ~1.1 GiB. Ingestion is mostly
+    #: waiting on embedding/vision HTTP calls, so 2 keeps throughput; scale with more worker replicas.
+    worker_concurrency: int = Field(default=2, ge=1, le=64)
 
     # ── Query cache (ticket 37; see docs/configuration.md "Query cache") ─────────────
     #: Master switch. The cache is fail-open: with Redis down requests are served uncached, never failed.

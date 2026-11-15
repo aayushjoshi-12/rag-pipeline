@@ -159,7 +159,9 @@ def test_chroma_volume_is_mounted_where_the_image_persists() -> None:
     # but every vector is lost when the pod restarts.
     for overlay in ("dev", "prod", "kind"):
         tpl = pod_specs(render(overlay))["chroma"]["spec"]["containers"][0]
-        assert {m["mountPath"] for m in tpl["volumeMounts"]} == {"/data"}, overlay
+        # /config.yaml is the read-only server config (ticket 48); the PVC is the only thing mounted at /data
+        assert {m["mountPath"] for m in tpl["volumeMounts"]} == {"/data", "/config.yaml"}, overlay
+        assert next(m for m in tpl["volumeMounts"] if m["mountPath"] == "/data")["name"] == "chroma-data", overlay
 
 
 def test_kind_overlay_is_self_consistent() -> None:
@@ -225,3 +227,58 @@ def test_s3_component_drops_the_shared_uploads_volume(tmp_path: Path) -> None:
         vols = by_kind(docs, "Deployment")[name]["spec"]["template"]["spec"]["volumes"]
         assert vols == [{"name": "uploads", "emptyDir": {}}], name
     test_references_resolve(docs)  # no dangling claim / mount after the patches
+
+
+# ── probes and memory sizing (tickets 48/49) ─────────────────────────────────────────────────────────
+
+
+def _mem(value: str) -> int:
+    units = {"Ki": 2**10, "Mi": 2**20, "Gi": 2**30}
+    for suffix, mult in units.items():
+        if value.endswith(suffix):
+            return int(float(value.removesuffix(suffix)) * mult)
+    return int(value)
+
+
+@pytest.mark.parametrize("overlay", [*OVERLAYS, "kind", "headless"])
+def test_api_probes_have_explicit_timeouts_and_a_startup_probe(overlay: str) -> None:
+    # Found on kind: /health pings db/redis/chroma/ollama, and the default timeoutSeconds of 1 gave "context
+    # deadline exceeded" readiness/liveness failures while the node was still pulling images.
+    c = next(c for c in pod_specs(render(overlay))["rag-pipeline-api"]["spec"]["containers"] if c["name"] == "api")
+    for kind in ("startupProbe", "readinessProbe", "livenessProbe"):
+        assert c[kind].get("timeoutSeconds", 1) >= 3, f"{kind} relies on the 1 s default timeout"
+    startup = c["startupProbe"]
+    assert startup["failureThreshold"] * startup["periodSeconds"] >= 120, "cold start budget too small"
+
+
+def test_worker_and_frontend_probes_do_not_use_the_one_second_default(docs: list[dict[str, Any]]) -> None:
+    for name in ("rag-pipeline-worker", "rag-pipeline-frontend"):
+        for c in pod_specs(docs)[name]["spec"]["containers"]:
+            for kind in ("readinessProbe", "livenessProbe"):
+                if kind in c:
+                    assert c[kind].get("timeoutSeconds", 1) >= 3, f"{name} {kind}"
+
+
+def test_memory_requests_and_limits_for_the_big_three(docs: list[dict[str, Any]]) -> None:
+    # A runaway container must hit its own cgroup limit instead of the node/VM OOM killer picking a victim.
+    specs = pod_specs(docs)
+    for name in ("chroma", "rag-pipeline-api", "rag-pipeline-worker"):
+        res = specs[name]["spec"]["containers"][0]["resources"]
+        assert _mem(res["requests"]["memory"]) <= _mem(res["limits"]["memory"]), name
+    worker = specs["rag-pipeline-worker"]["spec"]["containers"][0]["resources"]
+    # measured idle RSS of a worker at the default WORKER_CONCURRENCY=2 is ~445 MiB: a smaller request under-counts it
+    assert _mem(worker["requests"]["memory"]) >= 480 * 2**20
+
+
+def test_chroma_gets_the_bounded_index_cache_config(docs: list[dict[str, Any]]) -> None:
+    # Chroma 1.4.4 keeps ~3 MiB per collection ever written to, even after delete (reindex = delete + recreate).
+    tpl = pod_specs(docs)["chroma"]["spec"]
+    container = tpl["containers"][0]
+    mounts = {m["mountPath"]: m for m in container["volumeMounts"]}
+    assert mounts["/config.yaml"]["subPath"] == "config.yaml"
+    vol = next(v for v in tpl["volumes"] if v["name"] == mounts["/config.yaml"]["name"])
+    cm = by_kind(docs, "ConfigMap")[vol["configMap"]["name"]]
+    cfg = yaml.safe_load(cm["data"]["config.yaml"])
+    assert cfg["persist_path"] == "/data"  # the data volume stays where the image persists
+    assert 1 <= cfg["segment_manager"]["hnsw_index_pool_cache_config"]["lru"]["capacity"] <= 256
+    assert cm["data"]["config.yaml"] == (ROOT / "chroma" / "config.yaml").read_text()  # Compose uses the same file

@@ -82,6 +82,13 @@ services:
       # chromadb/chroma persists to /data (not /chroma/chroma): mounting the volume elsewhere silently
       # kept every vector in the container's writable layer, lost on any recreate.
       - chroma-data:/data
+      # Bounds the HNSW index cache (ticket 48): the default leaks ~3 MiB per collection ever written, so repeated
+      # reindexes ran the server to GBs. Same persist_path as the image's own /config.yaml.
+      - ./chroma/config.yaml:/config.yaml:ro
+    # A runaway container is OOM-killed on its own (and restarted) instead of the VM killing a random one.
+    # Sizing and measurements: docs/configuration.md "Memory".
+    mem_limit: 1536m
+    mem_reservation: 512m
 
   # Optional local S3 emulator for STORAGE_BACKEND=s3 / s3:// ingest. Only started with
   # `docker compose --profile s3 up -d floci floci-init` (the default `docker compose up` is unchanged).
@@ -139,6 +146,8 @@ services:
       retries: 3
       start_period: 10s
     restart: unless-stopped
+    mem_limit: 1g
+    mem_reservation: 256m
 
   worker:
     <<: *backend
@@ -152,6 +161,9 @@ services:
       chroma:
         condition: service_started
     restart: unless-stopped
+    # idle ~445 MiB with WORKER_CONCURRENCY=2; a 200-page scan peaks ~280 MiB more (pages render one at a time)
+    mem_limit: 3g
+    mem_reservation: 512m
 
   beat:
     <<: *backend

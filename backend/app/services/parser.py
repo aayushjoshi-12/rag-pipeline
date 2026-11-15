@@ -15,7 +15,7 @@ from app.config import Settings
 from app.services.backends import BaseBackend, get_parser_backend
 from app.services.langfuse import configure_from_settings
 from app.services.parse_errors import DocumentLoadError, UnsupportedFileTypeError
-from app.services.pdf_pages import PdfPageRenderer, extract_native_texts, render_pages
+from app.services.pdf_pages import extract_native_texts, page_count, render_page
 from app.services.retry import with_retry
 from app.services.textnorm import normalise_text
 
@@ -95,7 +95,7 @@ def _parse_pdf(
     try:
         native = extract_native_texts(path) if mode != "image" else None
         if native is None:
-            page_total = len(PdfPageRenderer(dpi=cfg.pdf_dpi).load(path))  # validates + counts
+            page_total = page_count(path)  # validates + counts, renders nothing
             texts: list[str | None] = [None] * page_total
         else:
             page_total = len(native)
@@ -104,7 +104,8 @@ def _parse_pdf(
                 for t in native
             ]
         need = [i for i, t in enumerate(texts) if t is None]
-        images = render_pages(path, need, cfg.pdf_dpi) if need else {}
+        if cfg.pdf_dpi <= 0:
+            raise ValueError("dpi must be positive")
     except Exception as exc:
         raise DocumentLoadError(f"Failed to load PDF {path}: {exc}") from exc
 
@@ -113,14 +114,21 @@ def _parse_pdf(
         if _backend is None:
             _backend = backend or get_parser_backend(provider=provider, settings=cfg)
         logger.debug("Extracting text from page %d/%d via %s", i + 1, page_total, _backend.name)
+        # One page image at a time, freed before the next render: a 200-page scan must not sit in RAM at once.
+        try:
+            image = render_page(path, i, cfg.pdf_dpi)
+        except Exception as exc:
+            raise DocumentLoadError(f"Failed to render page {i + 1} of PDF {path}: {exc}") from exc
         try:
             # Retry transient backend failures (timeouts + translated call errors,
             # incl. free-tier models returning empty/missing completions) per page.
-            texts[i] = with_retry(_backend.extract_text, images[i])
+            texts[i] = with_retry(_backend.extract_text, image)
         except Exception as exc:
             raise DocumentLoadError(
                 f"{_backend.name} backend failed on page {i + 1} of {path}: {exc}"
             ) from exc
+        finally:
+            del image
         logger.debug("Page %d: %d chars", i + 1, len(texts[i] or ""))
 
     page_texts = [t or "" for t in texts]
