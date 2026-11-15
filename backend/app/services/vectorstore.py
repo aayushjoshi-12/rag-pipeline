@@ -204,6 +204,23 @@ def _filter_clauses(filters: dict[str, Any]) -> list[tuple[str, list[Any]]]:
     return clauses
 
 
+_chroma_clients: dict[tuple[str, int], Any] = {}
+_chroma_clients_lock = threading.Lock()
+
+
+def _chroma_client(host: str, port: int) -> Any:
+    """One ``chromadb.HttpClient`` per server for the process. A client per ``ChromaStore`` (one per request)
+    leaked ~1.5 MB each: found by the ticket 37 benchmark, where the API container was OOM-killed. The collection
+    handle is still fetched per store, so a collection recreated by another process (reindex) is picked up."""
+    import chromadb
+
+    with _chroma_clients_lock:
+        client = _chroma_clients.get((host, port))
+        if client is None:
+            client = _chroma_clients[(host, port)] = chromadb.HttpClient(host=host, port=port)
+        return client
+
+
 class ChromaStore:
     """ChromaDB vector-store adapter (server mode via ``chromadb.HttpClient``).
 
@@ -221,12 +238,10 @@ class ChromaStore:
         collection_name: str | None = None,
         vector_settings: VectorSettings | None = None,
     ) -> None:
-        import chromadb
-
         self._host = host or _settings.chroma_host
         self._port = port or _settings.chroma_port
         self.settings = vector_settings or resolve_vector_settings(_settings, "chroma")
-        self._client = chromadb.HttpClient(host=self._host, port=self._port)
+        self._client = _chroma_client(self._host, self._port)
         self._collection = self._client.get_or_create_collection(
             name=collection_name or _settings.chroma_collection, configuration=cast(Any, self._configuration())
         )
