@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from app.services.cache import PREFIX, CacheCall, digest, normalize_query
 from app.services.context import MAX_CONTEXT_CHARS
-from app.services.llm import LLM, LLMConfigError
+from app.services.llm import LLM, Completion, LLMConfigError, LLMUnavailableError, aiter_stream
 from app.services.retriever import ChunkResult
 
 SYSTEM_PROMPT = (
@@ -122,3 +123,86 @@ async def answer_question(
             answer=got.answer, sources=chunks, prompt_tokens=0, completion_tokens=0, cost_usd=0.0
         )
     return got
+
+
+#: Size of the token events a cached answer is replayed in (characters).
+REPLAY_CHARS = 32
+
+
+@dataclass
+class PreparedStream:
+    """Everything decided before the first byte of a streamed answer (so failures are plain HTTP errors)."""
+
+    sources: list[ChunkResult]
+    state: str  # hit | miss | bypass | off  (the L3 verdict; "off" also when there was no context)
+    cached: Answer | None = None
+    #: Set on a miss when the answer may be stored once the stream ends cleanly.
+    key: str | None = None
+    user_prompt: str | None = None
+    llm: LLM | None = None
+    #: Cache verdict applies to this call (so headers/trace report it).
+    call: CacheCall | None = None
+
+
+async def prepare_stream(
+    question: str, chunks: list[ChunkResult], llm: LLM | None, *, cache: CacheCall | None = None
+) -> PreparedStream:
+    """Resolve everything that can fail before streaming: LLM config and the answer-cache lookup."""
+    if not chunks:
+        return PreparedStream(sources=chunks, state="off", cached=Answer(NO_CONTEXT_ANSWER, []))
+    if llm is None:
+        raise LLMConfigError("No LLM is configured (missing API key).")
+    user_prompt = build_user_prompt(normalize_query(question), chunks)
+    if cache is None or not cache.cache.layer_on("answer"):
+        if cache is not None:
+            cache.layers["answer"] = "off"
+        return PreparedStream(chunks, "off", user_prompt=user_prompt, llm=llm, call=cache)
+    key = answer_key(llm, user_prompt)
+    got, state = await cache.cache.lookup("answer", key, _decode_answer, bypass=cache.bypass)
+    cache.layers["answer"] = state
+    if got is not None:
+        cache.llm_calls_avoided += 1
+        cache.saved_usd = got.cost_usd
+        return PreparedStream(chunks, "hit", cached=got, call=cache)
+    # only a genuine miss may be stored; bypass means no read AND no write
+    return PreparedStream(
+        chunks,
+        state,
+        key=key if state == "miss" else None,
+        user_prompt=user_prompt,
+        llm=llm,
+        call=cache,
+    )
+
+
+async def stream_answer(prep: PreparedStream) -> AsyncIterator[str | Answer]:
+    """Yield text deltas, then ONE final ``Answer`` (full text, usage, cost). Failures raise (LLMError) and
+    nothing is stored; the answer is written to the cache only after the provider finished cleanly."""
+    if prep.cached is not None:
+        text = prep.cached.answer
+        for i in range(0, len(text), REPLAY_CHARS):
+            yield text[i : i + REPLAY_CHARS]
+        if prep.state == "hit":
+            yield Answer(text, prep.sources, 0, 0, 0.0)
+        else:  # no context: nothing was called, nothing is known
+            yield Answer(text, prep.sources)
+        return
+    assert prep.llm is not None and prep.user_prompt is not None
+    final: Completion | None = None
+    async for item in aiter_stream(prep.llm, SYSTEM_PROMPT, prep.user_prompt):
+        if isinstance(item, Completion):
+            final = item
+        else:
+            yield item
+    if final is None:
+        raise LLMUnavailableError("LLM stream ended without a final result.")
+    answer = Answer(
+        final.text.strip(),
+        prep.sources,
+        final.prompt_tokens,
+        final.completion_tokens,
+        final.cost_usd,
+    )
+    if prep.key is not None and prep.call is not None:
+        await prep.call.cache.put("answer", prep.key, _encode_answer(answer))
+    yield answer

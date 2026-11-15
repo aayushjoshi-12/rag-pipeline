@@ -8,7 +8,7 @@ import { renderAt, resetStore } from '../test/helpers'
 
 vi.mock('../config', () => ({ POLL_MS: 10 }))
 vi.mock('../api/client', () => ({
-  api: { health: vi.fn(), listDocuments: vi.fn(), chat: vi.fn() },
+  api: { health: vi.fn(), listDocuments: vi.fn(), chat: vi.fn(), chatStream: vi.fn() },
   ApiError: class ApiError extends Error {},
 }))
 const m = vi.mocked(api)

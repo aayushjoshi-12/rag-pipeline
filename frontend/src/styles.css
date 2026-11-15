@@ -1406,6 +1406,26 @@ input.switch:checked::after {
   overflow-wrap: anywhere;
   line-height: 1.65;
 }
+.answer.is-streaming:not(:empty)::after {
+  content: '';
+  display: inline-block;
+  width: 0.5ch;
+  height: 1.1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--ink-3);
+  animation: caret 1s steps(2, start) infinite;
+}
+@keyframes caret {
+  to {
+    visibility: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .answer.is-streaming:not(:empty)::after {
+    animation: none;
+  }
+}
 .thinking {
   display: flex;
   align-items: center;

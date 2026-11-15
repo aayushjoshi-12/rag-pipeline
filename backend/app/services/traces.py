@@ -35,11 +35,15 @@ async def record(
     error: str | None = None,
     question: str | None = None,
     meta: dict[str, Any] | None = None,
-) -> None:
-    """Persist a trace. Never raises: observability must not break the request it describes."""
+) -> uuid.UUID | None:
+    """Persist a trace and return its id (``None`` if it could not be saved).
+
+    Never raises: observability must not break the request it describes."""
+    trace_id = uuid.uuid4()
     try:
         session.add(
             Trace(
+                id=trace_id,
                 kind=kind,
                 status=status,
                 duration_ms=max(0, duration_ms),
@@ -56,12 +60,14 @@ async def record(
             )
         )
         await session.commit()
+        return trace_id
     except Exception:
         logger.warning("could not record trace", exc_info=True)
         try:
             await session.rollback()
         except Exception:
             logger.debug("rollback after trace failure also failed", exc_info=True)
+        return None
 
 
 async def list_traces(

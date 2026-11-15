@@ -96,6 +96,21 @@ export interface ChatResponse {
   sources: Source[]
 }
 
+/** Final event of `POST /chat/stream`. */
+export interface ChatDone {
+  answer: string
+  usage: { prompt_tokens: number | null; completion_tokens: number | null }
+  cost_usd: number | null
+  cache: string
+  trace_id: string | null
+}
+
+export type ChatStreamEvent =
+  | { event: 'sources'; data: { sources: Source[]; cache: string } }
+  | { event: 'token'; data: { text: string } }
+  | { event: 'done'; data: ChatDone }
+  | { event: 'error'; data: { status: number; detail: string; trace_id: string | null } }
+
 export interface HealthCheck {
   ok: boolean
   detail: string

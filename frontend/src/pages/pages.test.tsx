@@ -16,6 +16,7 @@ vi.mock('../api/client', () => ({
     upload: vi.fn(),
     replace: vi.fn(),
     chat: vi.fn(),
+    chatStream: vi.fn(),
   },
   ApiError: class ApiError extends Error {},
 }))

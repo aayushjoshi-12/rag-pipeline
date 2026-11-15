@@ -560,3 +560,69 @@ second key, deploying it, then revoking the first.
 same verdict in `cache`. Send `"cache": false` (or `Cache-Control: no-cache`) to bypass it for one request. `GET /cache/stats?days=7` (permission `traces:read`)
 and `POST /cache/purge` (permission `cache:manage`). See [`configuration.md`](./configuration.md#query-cache).
 
+
+<!-- ===== Ticket 38: Chat streaming (SSE) ===== -->
+
+## Streaming chat: `POST /chat/stream`
+
+Same request body, same permission (`chat:use`), same retrieval, same prompt and same answer cache as
+`POST /chat`, but the answer arrives token by token as Server-Sent Events (`Content-Type: text/event-stream`).
+`POST /chat` is unchanged. Use `curl -N` (no buffering) or `fetch` + `ReadableStream`; the browser `EventSource`
+API cannot be used because it cannot send an `Authorization` header (and only does GET).
+
+```bash
+curl -N -X POST http://localhost:8000/chat/stream \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"question": "What does chapter 2 say about ...?"}'
+```
+
+### Before the stream starts: plain HTTP errors
+
+Everything that can fail cheaply happens before the first byte, so these are ordinary JSON errors (`{"detail": ...}`),
+not SSE events: `401` (no/invalid credentials), `403` (missing `chat:use`), `422` (invalid body), retrieval
+failures (`503`/`502`, as on `/chat`) and a missing/invalid LLM configuration (`503`). The answer-cache lookup
+also happens here, so the response headers are accurate: `X-Cache: hit|miss|bypass|off` and `X-Cache-Layers`
+(identical semantics to `/chat`, including `cache: false` and `Cache-Control: no-cache`).
+
+### Events
+
+Each event is `event: <name>` + one `data: <single-line JSON>` + a blank line. Order: `sources`, then zero or more
+`token`, then **exactly one** terminal event, `done` or `error` (never both, never a half-open stream), unless the
+client disconnects.
+
+| Event | `data` | Notes |
+|---|---|---|
+| `sources` | `{"sources": [SourceOut...], "cache": "hit\|miss\|bypass\|off"}` | First event, as soon as retrieval is done. `sources[]` has exactly the shape of `/chat` `sources` (citation `[n]` = position `n`). |
+| `token` | `{"text": "<delta>"}` | Append to the answer. A cache hit is replayed as ~32-character `token` events (no artificial delay); "no relevant documents" is also sent as `token`s. |
+| `done` | `{"answer", "usage": {"prompt_tokens", "completion_tokens"}, "cost_usd", "cache", "trace_id"}` | `answer` is the final, trimmed text (prefer it over your concatenation). `usage` and `cost_usd` follow `/traces` semantics: `cost_usd` is `null` when unknown (never `0` for "unknown"); a cache hit reports `0`/`0`/`0.0`. `trace_id` is the `GET /traces/{id}` row. |
+| `error` | `{"status": 502\|503\|500, "detail", "trace_id"}` | The LLM failed after the stream opened (provider timeout/5xx/rate limit = `503`, rejected request = `502`, anything unexpected = `500` with a generic `detail`). Tokens already sent may be a partial answer: discard or label it. |
+
+```
+event: sources
+data: {"sources":[{"text":"...","document_id":"...","chunk_index":3,"filename":"ch2.pdf","score":0.21,...}],"cache":"miss"}
+
+event: token
+data: {"text":"The standard "}
+
+event: token
+data: {"text":"requires [1]."}
+
+event: done
+data: {"answer":"The standard requires [1].","usage":{"prompt_tokens":812,"completion_tokens":14},"cost_usd":0.0,"cache":"miss","trace_id":"..."}
+```
+
+### Behaviour worth knowing
+
+- **Cache:** a hit replays the stored answer with no LLM call (`X-Cache: hit`). A miss streams live and the full
+  answer is stored **only after the provider finished cleanly**; a failure or a client disconnect stores nothing.
+  Streamed and non-streamed requests share the same entries. Unlike `/chat`, two concurrent identical misses are not
+  coalesced (each calls the LLM).
+- **Cancellation:** if the client disconnects (closes the connection, `AbortController.abort()`, Ctrl-C in curl) the
+  upstream LLM request is cancelled at the next chunk and nothing is cached. The trace is still written
+  (`status: error`, `error: client_disconnected`, `meta.cancelled: true`).
+- **Tracing / cost:** one `chat` trace row (with `meta.streamed: true` and `meta.ttft_ms`, the time to the first
+  token) and one LLM generation per request, written when the stream ends. Prompt/completion tokens and the cost
+  are captured from the provider's final usage chunk (OpenRouter: `usage.include`), as on `/chat`.
+- **Proxies:** the response sets `Cache-Control: no-cache` and `X-Accel-Buffering: no`; put no response buffering
+  or compression middlebox in front of it, or tokens will arrive in bursts.
+- **Not included:** resumable streams (`Last-Event-ID`), WebSockets, streaming for `/search`.

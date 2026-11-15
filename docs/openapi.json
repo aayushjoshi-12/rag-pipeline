@@ -3393,6 +3393,82 @@
         ]
       }
     },
+    "/v1/chat/stream": {
+      "post": {
+        "description": "Same inputs and permission as ``POST /chat``; the answer arrives as Server-Sent Events.\n\nEverything that can fail cheaply (auth, validation, retrieval, missing LLM key) happens BEFORE the\nresponse starts and is a normal HTTP error. After that the stream ends with exactly one ``done`` or\n``error`` event, unless the client left, in which case the upstream LLM call is cancelled.",
+        "operationId": "chat_stream_v1_chat_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {}
+            },
+            "description": "SSE, see docs/api.md"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Missing, invalid or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "The caller lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unexpected server error."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "summary": "Chat Stream",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
     "/v1/documents": {
       "get": {
         "description": "Documents, newest first, as `{items, total, limit, offset, has_more}`.\n\nPage through with `offset += limit` until `has_more` is false. Out-of-range `limit`/`offset`\nis a `422` (never silently clamped).",

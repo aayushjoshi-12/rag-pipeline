@@ -317,6 +317,36 @@ class QueryCache:
         finally:
             self._inflight.pop(loop_key, None)
 
+    # ── split get / put (streaming: the value only exists once the stream finished) ───────────
+    async def lookup(
+        self, layer: str, key: str, decode: Callable[[bytes], T], *, bypass: bool = False
+    ) -> tuple[T | None, str]:
+        """Read-only half of ``cached``: ``(value, "hit")`` or ``(None, miss | bypass | off)``. No single flight."""
+        if not self.layer_on(layer):
+            return None, "off"
+        counters = self.counters[layer]
+        if bypass:
+            counters.bypass += 1
+            return None, "bypass"
+        raw = await self._get(key)
+        if raw is not None:
+            try:
+                value = decode(raw)
+            except Exception:
+                logger.warning("undecodable %s cache entry dropped", layer)
+                counters.error += 1
+            else:
+                counters.hit += 1
+                return value, "hit"
+        counters.miss += 1
+        return None, "miss"
+
+    async def put(self, layer: str, key: str, payload: bytes | None) -> bool:
+        """Write-only half of ``cached``; call only after the computation finished cleanly."""
+        if payload is None or not self.layer_on(layer):
+            return False
+        return await self._set(layer, key, payload)
+
     # ── admin ────────────────────────────────────────────────────────────────────────────────
     async def purge(self, layers: tuple[str, ...] = LAYERS) -> int | None:
         """Delete this cache's entries of ``layers`` (SCAN + DEL under the prefix only). ``None`` = Redis down."""

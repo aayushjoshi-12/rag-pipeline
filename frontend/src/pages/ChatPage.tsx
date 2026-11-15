@@ -71,7 +71,7 @@ function SourceCard({ source, n }: { source: Source; n: number }) {
 }
 
 export default function ChatPage() {
-  const { documents, refreshDocuments, chat, ask } = useStore()
+  const { documents, refreshDocuments, chat, ask, stopChat } = useStore()
   const [question, setQuestion] = useState('')
   const [selected, setSelected] = useState<string[]>([])
   const [prefs, setPrefs] = useState<RetrievalPrefs>(loadPrefs)
@@ -93,7 +93,8 @@ export default function ChatPage() {
       setQuestion('')
     }
   }
-  const started = chat.pending || chat.response !== null || chat.error !== null
+  const started =
+    chat.pending || chat.response !== null || chat.error !== null || chat.stopped === true
 
   return (
     <div className="chat">
@@ -114,7 +115,7 @@ export default function ChatPage() {
             <div className="bubble">{chat.question}</div>
           </div>
         )}
-        {chat.pending && (
+        {chat.pending && !chat.response && (
           <div className="msg msg-bot" aria-busy="true">
             <div className="card bot-card">
               <p className="thinking">
@@ -128,21 +129,44 @@ export default function ChatPage() {
             </div>
           </div>
         )}
-        {chat.error && (
+        {chat.stopped && !chat.response && (
           <div className="msg msg-bot">
-            <Alert>{chat.error}</Alert>
+            <p className="muted small" role="status">
+              Stopped.
+            </p>
           </div>
         )}
         {chat.response && (
           <div className="msg msg-bot">
-            <section aria-label="answer" className="card bot-card">
+            <section
+              aria-label="answer"
+              className="card bot-card"
+              aria-busy={chat.streaming ? 'true' : undefined}
+            >
               <div className="bot-label">
                 <span className="brand-mark brand-mark-sm">
                   <Icon name="logo" size={12} />
                 </span>
                 Answer
               </div>
-              <div className="answer">{chat.response.answer}</div>
+              <div className={chat.streaming ? 'answer is-streaming' : 'answer'}>
+                {chat.response.answer}
+                {chat.streaming && chat.response.answer === '' && (
+                  <span className="typing" aria-label="Writing the answer">
+                    <i />
+                    <i />
+                    <i />
+                  </span>
+                )}
+              </div>
+              {chat.stopped && (
+                <p className="muted small" role="status">
+                  Stopped. {chat.response.answer ? 'The answer above is partial.' : ''}
+                </p>
+              )}
+              {chat.done?.cache === 'hit' && (
+                <p className="muted small">Served from the answer cache.</p>
+              )}
               {chat.response.sources.length === 0 ? (
                 <p className="notice">
                   <Icon name="alert" size={16} />
@@ -165,6 +189,11 @@ export default function ChatPage() {
                 </>
               )}
             </section>
+          </div>
+        )}
+        {chat.error && (
+          <div className="msg msg-bot">
+            <Alert>{chat.error}</Alert>
           </div>
         )}
       </div>
@@ -215,14 +244,16 @@ export default function ChatPage() {
               }
             }}
           />
-          <button
-            type="submit"
-            className="btn btn-primary"
-            disabled={chat.pending || !question.trim()}
-          >
-            <Icon name="send" size={15} />
-            {chat.pending ? 'Thinking…' : 'Ask'}
-          </button>
+          {chat.pending ? (
+            <button type="button" className="btn" onClick={stopChat}>
+              Stop
+            </button>
+          ) : (
+            <button type="submit" className="btn btn-primary" disabled={!question.trim()}>
+              <Icon name="send" size={15} />
+              Ask
+            </button>
+          )}
         </div>
       </form>
     </div>

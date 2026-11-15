@@ -4,6 +4,7 @@ import type {
   ApiKeyCreateInput,
   ChatRequest,
   ChatResponse,
+  ChatStreamEvent,
   Chunk,
   CacheStats,
   Credits,
@@ -26,6 +27,7 @@ import type {
   UserUpdateInput,
 } from '../types'
 import { clearTokens, getTokens, notifySessionLost, setTokens } from '../auth/session'
+import { StreamUnavailableError, readChatStream } from './stream'
 
 export const BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? '/api'
 
@@ -99,13 +101,14 @@ async function send(path: string, init: RequestInit): Promise<Response> {
   try {
     return await fetch(`${BASE_URL}${path}`, { ...init, headers })
   } catch (e) {
+    if (typeof e === 'object' && e !== null && (e as { name?: unknown }).name === 'AbortError')
+      throw e // a deliberate cancel, not a network failure
     throw new ApiError(0, e instanceof Error ? `Network error: ${e.message}` : 'Network error')
   }
 }
 
-/** The single request path: every API call goes through here, so errors are uniform.
- * A 401 triggers one token refresh and one retry; if that fails the session is dropped. */
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** Authenticated fetch. A 401 triggers one token refresh and one retry; if that fails the session is dropped. */
+async function sendAuthed(path: string, init: RequestInit): Promise<Response> {
   let res = await send(path, init)
   if (res.status === 401 && !path.startsWith('/auth/') && getTokens()) {
     if (await refreshSession()) {
@@ -115,9 +118,46 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       notifySessionLost()
     }
   }
+  return res
+}
+
+/** The single request path for JSON calls: every API call goes through here, so errors are uniform. */
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await sendAuthed(path, init)
   if (!res.ok) throw new ApiError(res.status, await errorMessage(res))
   if (res.status === 204) return undefined as T
   return (await res.json()) as T
+}
+
+/** Open `POST /chat/stream` and feed its events to `onEvent`. Resolves when the stream ends (normally after a
+ * `done` or `error` event); rejects with `StreamUnavailableError` when it could not be opened (then use `chat`),
+ * `ApiError` for a real HTTP error, and an `AbortError` when `signal` fires. */
+async function chatStream(
+  req: ChatRequest,
+  onEvent: (e: ChatStreamEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response
+  try {
+    res = await sendAuthed('/chat/stream', {
+      method: 'POST',
+      body: JSON.stringify(req),
+      headers: { Accept: 'text/event-stream' },
+      signal,
+    })
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 0) throw new StreamUnavailableError(e.message)
+    throw e
+  }
+  if (!res.ok) {
+    // an older backend (or a proxy) without the route: use the plain endpoint instead
+    if ([404, 405, 501].includes(res.status))
+      throw new StreamUnavailableError(`streaming is not available (HTTP ${res.status})`)
+    throw new ApiError(res.status, await errorMessage(res))
+  }
+  if (!res.body || !(res.headers.get('Content-Type') ?? '').includes('text/event-stream'))
+    throw new StreamUnavailableError('the server did not answer with an event stream')
+  await readChatStream(res.body, onEvent)
 }
 
 export const api = {
@@ -181,6 +221,7 @@ export const api = {
     form.append('file', file)
     return request<UploadResponse>(`/documents/${id}`, { method: 'PUT', body: form })
   },
+  chatStream,
   chat: (req: ChatRequest) =>
     request<ChatResponse>('/chat', { method: 'POST', body: JSON.stringify(req) }),
 }
