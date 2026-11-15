@@ -20,6 +20,13 @@ function pushText(parts: AnswerPart[], text: string) {
   else parts.push({ kind: 'text', text })
 }
 
+/** Marker parts of a code-free text run (used by the markdown renderer on text nodes). */
+export function splitCitations(text: string, count: number): AnswerPart[] {
+  const parts: AnswerPart[] = []
+  splitMarkers(text, count, parts)
+  return parts
+}
+
 function splitMarkers(text: string, count: number, parts: AnswerPart[]) {
   let at = 0
   for (const m of text.matchAll(MARKER)) {

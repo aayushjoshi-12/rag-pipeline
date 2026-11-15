@@ -114,6 +114,7 @@ export default function ChatPage() {
                   sources={chat.response.sources}
                   re={re}
                   onCite={jump}
+                  streaming={chat.streaming}
                 />
                 {chat.streaming && chat.response.answer === '' && (
                   <span className="typing" aria-label="Writing the answer">

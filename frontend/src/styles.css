@@ -1423,9 +1423,109 @@ input.switch:checked::after {
   color: var(--ink-2);
 }
 .answer {
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
   line-height: 1.65;
+  min-width: 0;
+}
+/* Markdown inside the answer (ticket 47) */
+.answer > :first-child {
+  margin-top: 0;
+}
+.answer > :last-child {
+  margin-bottom: 0;
+}
+.answer p,
+.answer ul,
+.answer ol,
+.answer blockquote,
+.answer .md-pre,
+.answer .md-table {
+  margin: 0 0 var(--s-3);
+}
+.answer ul,
+.answer ol {
+  padding-left: 1.4rem;
+}
+.answer li {
+  margin: 0.2rem 0;
+}
+.answer li > p {
+  margin: 0;
+}
+.answer li > ul,
+.answer li > ol {
+  margin: 0.2rem 0 0;
+}
+.answer li::marker {
+  color: var(--ink-3);
+}
+.answer strong {
+  font-weight: 650;
+}
+.answer .md-h {
+  margin: var(--s-4) 0 var(--s-2);
+  font-size: 1rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.answer a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.answer blockquote {
+  padding: var(--s-1) var(--s-3);
+  border-left: 3px solid var(--border-strong);
+  color: var(--ink-2);
+}
+.answer code {
+  padding: 0.1em 0.35em;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font: 0.875em var(--mono);
+}
+.answer .md-pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--s-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  line-height: 1.5;
+}
+.answer .md-pre code {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 0.8125rem;
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.answer .md-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.answer .md-table table {
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.answer .md-table th,
+.answer .md-table td {
+  padding: var(--s-1) var(--s-3);
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+}
+.answer .md-table th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.answer hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: var(--s-4) 0;
 }
 .answer.is-streaming:not(:empty)::after {
   content: '';

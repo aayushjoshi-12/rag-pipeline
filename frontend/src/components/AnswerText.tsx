@@ -1,5 +1,17 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { citationText, highlight, parseAnswer, snippet } from '../citations'
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { citationText, highlight, snippet, splitCitations } from '../citations'
 import type { Source } from '../types'
 
 /** Matched terms rendered as <mark>. */
@@ -100,27 +112,132 @@ function Cite({
   )
 }
 
-/** The answer text with `[n]` markers that point at a real source turned into citation buttons. */
+// Minimal structural types for the mdast tree (the plugin only needs these).
+interface MdNode {
+  type: string
+  value?: string
+  children?: MdNode[]
+  data?: { hName: string; hProperties: Record<string, unknown> }
+}
+// Text inside these is never turned into markers: links keep `[1](url)` as a link.
+const SKIP = new Set(['link', 'linkReference', 'code', 'inlineCode', 'definition'])
+
+/** Remark plugin: `[n]` in text nodes (paragraphs, list items, emphasis, headings, cells) become
+ * `cite-marker` elements. Code and links are never touched, so those stay plain text. */
+function remarkCitations(count: number) {
+  const walk = (node: MdNode) => {
+    if (!node.children || SKIP.has(node.type)) return
+    const out: MdNode[] = []
+    for (const child of node.children) {
+      if (child.type !== 'text') {
+        walk(child)
+        out.push(child)
+        continue
+      }
+      for (const part of splitCitations(child.value ?? '', count)) {
+        out.push(
+          part.kind === 'text'
+            ? { type: 'text', value: part.text }
+            : {
+                type: 'cite',
+                data: { hName: 'cite-marker', hProperties: { n: part.n } },
+              },
+        )
+      }
+    }
+    node.children = out
+  }
+  return (tree: MdNode) => walk(tree)
+}
+
+/** While streaming: close a dangling inline code / bold and hide a half-typed `[1` marker so the
+ * structure does not flicker between chunks. Fenced blocks and lists parse fine unclosed. */
+export function healStreaming(text: string): string {
+  let out = text.replace(/\[\d{0,3}(?:\s*,\s*\d{0,3})*\s*$/, '')
+  const fences = out.match(/^ {0,3}(```|~~~)/gm)?.length ?? 0
+  if (fences % 2 === 1) return out // inside an open fence: leave it alone
+  const lastLine = out.slice(out.lastIndexOf('\n') + 1)
+  if ((lastLine.match(/`/g)?.length ?? 0) % 2 === 1) out += '`'
+  else if ((lastLine.replace(/`[^`]*`/g, '').match(/\*\*/g)?.length ?? 0) % 2 === 1) out += '**'
+  return out
+}
+
+interface CiteCtx {
+  sources: Source[]
+  re: RegExp | null
+  onCite: (n: number) => void
+}
+const CiteContext = createContext<CiteCtx>({ sources: [], re: null, onCite: () => {} })
+
+function CiteMarker({ n }: CiteProps) {
+  const { sources, re, onCite } = useContext(CiteContext)
+  const source = n ? sources[n - 1] : undefined
+  return source && n ? <Cite n={n} source={source} re={re} onCite={onCite} /> : null
+}
+
+type CiteProps = { n?: number } & ExtraProps
+
+/** The answer text rendered as safe markdown (no raw HTML) with `[n]` markers that point at a real
+ * source turned into citation buttons. */
 export function AnswerText({
   text,
   sources,
   re,
   onCite,
+  streaming = false,
 }: {
   text: string
   sources: Source[]
   re: RegExp | null
   onCite: (n: number) => void
+  streaming?: boolean
 }) {
-  return (
-    <>
-      {parseAnswer(text, sources.length).map((p, i) =>
-        p.kind === 'text' ? (
-          <span key={i}>{p.text}</span>
-        ) : (
-          <Cite key={i} n={p.n} source={sources[p.n - 1]!} re={re} onCite={onCite} />
+  // `components` must keep a stable identity or every render would remount the markers (and close
+  // their popovers); the live values reach them through a context.
+  const components = useMemo(
+    () =>
+      ({
+        'cite-marker': CiteMarker,
+        a: ({ href, children }) => (
+          <a href={href} target="_blank" rel="noopener noreferrer">
+            {children}
+          </a>
         ),
-      )}
-    </>
+        table: ({ children }) => (
+          <div className="md-table" tabIndex={0} role="region" aria-label="Table">
+            <table>{children}</table>
+          </div>
+        ),
+        h1: ({ children }) => <h4 className="md-h">{children}</h4>,
+        h2: ({ children }) => <h4 className="md-h">{children}</h4>,
+        h3: ({ children }) => <h4 className="md-h">{children}</h4>,
+        h4: ({ children }) => <h4 className="md-h">{children}</h4>,
+        h5: ({ children }) => <h4 className="md-h">{children}</h4>,
+        h6: ({ children }) => <h4 className="md-h">{children}</h4>,
+        pre: ({ children }) => (
+          <pre tabIndex={0} className="md-pre">
+            {children}
+          </pre>
+        ),
+      }) as Components,
+    [],
+  )
+  const plugins = useMemo(
+    () => [remarkGfm, () => remarkCitations(sources.length)],
+    [sources.length],
+  )
+  const ctx = useMemo(() => ({ sources, re, onCite }), [sources, re, onCite])
+  return (
+    <CiteContext.Provider value={ctx}>
+      <ReactMarkdown
+        remarkPlugins={plugins}
+        components={components}
+        skipHtml
+        disallowedElements={['img']}
+        unwrapDisallowed
+      >
+        {streaming ? healStreaming(text) : text}
+      </ReactMarkdown>
+    </CiteContext.Provider>
   )
 }
