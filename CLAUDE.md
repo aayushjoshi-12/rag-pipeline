@@ -133,10 +133,17 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │   │   ├── main.py              # FastAPI app + lifespan
 │   │   ├── config.py            # pydantic-settings; three-layer config (env > config.json > defaults)
 │   │   ├── celery_app.py        # Celery instance, broker/backend config, beat schedule
-│   │   ├── routers/             # route handlers (one file per resource)
-│   │   │   ├── health.py        # GET /health — probes DB, Redis, Chroma, worker
+│   │   ├── http_common.py       # error envelope, X-Request-ID, /v1 mounting + deprecated aliases
+│   │   ├── openapi_contract.py  # OpenAPI snapshot export + breaking-change check (make openapi)
+│   │   ├── routers/             # route handlers (one file per resource), all mounted under /v1
+│   │   │   ├── health.py        # GET /health — probes DB, Redis, Chroma, worker (unversioned)
 │   │   │   ├── documents.py     # upload/list/get/delete documents, kick ingestion
-│   │   │   └── chat.py          # POST /chat — RAG query
+│   │   │   ├── chat.py          # POST /chat, POST /chat/stream (SSE) — RAG query
+│   │   │   ├── search.py        # POST /search — ranked passages, no LLM
+│   │   │   ├── auth.py, api_keys.py, auth_deps.py  # login/RBAC, machine API keys, permission deps
+│   │   │   ├── traces.py        # traces, usage, insights, credits
+│   │   │   ├── cache.py         # GET /cache/stats, POST /cache/purge
+│   │   │   └── capabilities.py  # GET /capabilities
 │   │   ├── services/            # business logic — no HTTP knowledge
 │   │   │   ├── ingestion.py     # orchestrate parse → chunk → embed → store
 │   │   │   ├── parser.py        # parse seam: file → common ParseResult
@@ -144,13 +151,18 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │   │   │   ├── chunking.py      # configurable chunking strategies
 │   │   │   ├── embeddings.py    # get_embedder (ollama HTTP / openai SDK, custom protocol)
 │   │   │   ├── vectorstore.py   # Chroma store adapter (embedded ↔ server)
-│   │   │   ├── retriever.py     # similarity + metadata filter retrieval
-│   │   │   └── qa.py            # RAG chain / answer synthesis (OpenRouter default)
+│   │   │   ├── retriever.py     # semantic / keyword / hybrid retrieval + metadata filter
+│   │   │   ├── search.py        # shared retrieve_ranked path (/search and /chat), neighbour context
+│   │   │   ├── cache.py         # Redis query cache (embedding / retrieval / answer), ADR-0004
+│   │   │   ├── llm.py           # providers: complete() + stream(), usage and cost capture
+│   │   │   ├── storage.py, fetcher.py, urlguard.py  # local/S3 files, URL ingest, SSRF guard
+│   │   │   ├── traces.py, usage_insights.py, credits.py  # trace log, usage aggregates, key balance
+│   │   │   └── qa.py            # RAG prompt + answer synthesis (OpenRouter default)
 │   │   ├── tasks/               # Celery task modules
 │   │   │   ├── ingest.py        # async ingest pipeline
 │   │   │   └── cleanup.py       # retention/tmp cleanup, reindex
 │   │   ├── db/                  # data layer
-│   │   │   ├── models.py        # SQLAlchemy ORM: Document, Chunk, Job
+│   │   │   ├── models.py        # SQLAlchemy ORM: Document, Chunk, Job, Trace, User, Role, ApiKey
 │   │   │   └── ops.py           # async DB ops
 │   │   └── schema/              # pydantic request/response models
 │   ├── config/
@@ -165,7 +177,7 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 │   │   ├── api/client.ts
 │   │   ├── App.tsx
 │   │   ├── components/
-│   │   ├── pages/               # Traces, Documents, Ingestion, Settings
+│   │   ├── pages/               # Overview, Documents, Chat, Traces, Usage (Cost/Performance/RAG/Ingest/Cache), Admin
 │   │   ├── store/               # Zustand stores
 │   │   └── types/
 │   ├── vite.config.ts           # Vite + proxy → backend :8000
@@ -184,9 +196,11 @@ Documents may contain sensitive content. Raw uploads live only under `data/` / `
 ├── context/                     # founding context (see below)
 │   └── v0/
 │       └── README.md
-├── docs/
-│   └── adr/
-│       └── 0001-stack.md
+├── scripts/                     # bench_cache.py (cache benchmark), verify_api_docs.py (runs docs/api.md examples)
+├── docs/                        # index in docs/README.md
+│   ├── adr/                     # 0001 stack · 0002 parsing · 0003 chunking · 0004 cache · 0005 /v1 contract · 0006 SSE · 0007 API keys
+│   ├── api.md  configuration.md  architecture.md  performance.md
+│   └── openapi.json             # committed API contract (generated: make openapi); openapi-breaking-ack.json = approved breaks
 ├── data/                        # gitignored; runtime uploads/store
 └── tmp/                         # gitignored; dev-workflow artifacts (all scratch, never committed)
     ├── tickets/                 # local Jira — ticket + status + acceptance criteria
@@ -213,7 +227,8 @@ Secret fields (K8s Secret / `.env`-owned): provider keys (`OPENROUTER_API_KEY` d
 Non-secret tunables (JSON-owned): `RAG_ENV`, `PORT`, `LOG_LEVEL`, `EMBEDDING_PROVIDER`,
 `EMBEDDING_MODEL`, `OLLAMA_BASE_URL`, `LLM_PROVIDER`,
 `DEFAULT_LLM_MODEL`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `VECTOR_STORE`, `DEFAULT_TOP_K`,
-`MAX_UPLOAD_SIZE_BYTES`, plus all `PARSER_*` / `OPENROUTER_BASE_URL` / `PDF_DPI` / `OCR_LANG`
+`MAX_UPLOAD_SIZE_BYTES`, `LLM_MAX_TOKENS` (once ticket 40 lands), `CACHE_*` (query cache, ADR-0004), `CORS_ALLOW_ORIGINS`,
+`RETRIEVAL_*`, `VECTOR_*`/`HNSW_*`, `STORAGE_BACKEND`/`S3_*` (the S3 keys are secrets), plus all `PARSER_*` / `OPENROUTER_BASE_URL` / `PDF_DPI` / `OCR_LANG`
 / `DOCX_READER` parse knobs (see ADR-0002).
 
 ## Quality gates
@@ -233,9 +248,10 @@ Coverage target: 70% on new code. Aim for it.
 ### Test conventions
 
 - **Unit tests** (`backend/tests/unit/`): pure-function logic, isolated services with fakes.
-- **Integration tests** (`backend/tests/integration/`): FastAPI `TestClient`, file-based SQLite
-  in a temp dir or a real test Postgres, the lifespan actually runs. Replace external clients
+- **Integration tests** (`backend/tests/integration/`): FastAPI `TestClient`/`httpx` against a
+  real throwaway Postgres (never SQLite, never the dev `rag` DB), the lifespan actually runs. Replace external clients
   (LLM, Chroma, Redis) with fakes in test setup — not by monkeypatching modules.
+- Suites run with `CACHE_ENABLED=false` (the query cache lives in a shared Redis); cache tests opt in on Redis db 13 and use a real Redis on purpose (invalidation, TTL and fail-open are the behaviour under test).
 - **Don't make real API calls in tests** (no live OpenAI/Anthropic/Chroma/Redis). Use
   `pytest-httpx`, `MagicMock`, or in-memory fakes.
 
@@ -276,4 +292,8 @@ path.
 | Why does this repo exist / what's the scope? | `context/v0/README.md` |
 | Stack decision + rejected alternatives | `docs/adr/0001-stack.md` |
 | How does parsing work? | `docs/adr/0002-document-parsing.md` + `backend/app/services/parser.py` |
-| What's the phased build process? | `docs/*` as they land |
+| Where is everything documented? | `docs/README.md` (index) |
+| Why a query cache, how is it invalidated, what are the numbers? | `docs/adr/0004-query-cache.md` + `docs/performance.md` |
+| API versioning, error envelope, OpenAPI contract? | `docs/adr/0005-api-versioning-and-contract.md` + `docs/api.md` |
+| Streaming chat / API keys? | `docs/adr/0006-chat-streaming-sse.md`, `docs/adr/0007-api-keys.md` |
+| Every setting and its default? | `docs/configuration.md` |

@@ -56,3 +56,10 @@ Switching the store, metric, index type or embedding dimension on existing data 
 `python -m app.manage reindex` (re-embeds from the stored chunk text); the app detects the drift and says so instead of
 returning quietly wrong results. The earlier plan to keep chunk vectors in `chunks.vector` was dropped: chunk rows are
 replaced wholesale on every ingest and that column was a fixed `vector(1024)`. See `docs/configuration.md`.
+
+## Addendum (2026-11-15): what changed around the original stack
+
+- **File storage** is pluggable: local disk (default) or S3 (the Floci AWS emulator locally; it replaced MinIO), plus ingest from a URL or an `s3://` link. See `docs/configuration.md`.
+- **Redis also hosts the query cache** (own db 12, fail-open): [ADR-0004](0004-query-cache.md). API contract and `/v1`: [ADR-0005](0005-api-versioning-and-contract.md). Streaming chat: [ADR-0006](0006-chat-streaming-sse.md). API keys: [ADR-0007](0007-api-keys.md).
+- **The default chat model is a configuration choice, not part of this decision.** The free `nvidia/nemotron-*:free` default named above often returns empty answers (a reasoning model spending its output budget); the model is set with `DEFAULT_LLM_MODEL`, and a tiny non-reasoning model is used when cost reporting is under test.
+
