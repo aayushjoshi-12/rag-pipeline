@@ -1,0 +1,13 @@
+# HTTPS for the published-image stack. Layer it on top of docker-compose.image.yml:
+#   docker compose -f docker-compose.image.yml -f docker-compose.tls.yml up -d
+# Put your certificate and key in ./certs (fullchain.pem, privkey.pem), or `make tls-selfsigned` for a local one.
+# Dashboard: https://localhost:8443 (RAG_TLS_PORT). Plain HTTP stays on RAG_UI_PORT.
+services:
+  frontend:
+    environment:
+      TLS_CERT_FILE: /certs/fullchain.pem
+      TLS_KEY_FILE: /certs/privkey.pem
+    volumes:
+      - ./certs:/certs:ro
+    ports:
+      - "${RAG_TLS_PORT:-8443}:8443"
