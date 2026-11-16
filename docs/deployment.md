@@ -99,6 +99,20 @@ instead of a shared volume (the multi-node answer). To try it on a laptop, follo
 [kubernetes-local.md](kubernetes-local.md) (kind, with a `k8s/overlays/kind` overlay that uses locally
 built images and the host's Ollama; the Ingress needs your cluster's `ingressClassName`).
 
+## HTTPS
+
+- **Kubernetes:** the `prod` and `headless` Ingresses terminate TLS (`spec.tls`, secret `rag-pipeline-tls`) and redirect HTTP to
+  HTTPS. Replace the host, and either keep the `cert-manager.io/cluster-issuer` annotation (cert-manager issues the
+  certificate; set it to your ClusterIssuer) or delete it and create the Secret yourself
+  (`kubectl -n rag-pipeline create secret tls rag-pipeline-tls --cert=fullchain.pem --key=privkey.pem`). Pods stay plain HTTP
+  behind the Ingress. The Ingress needs a controller that supports TLS (ingress-nginx does).
+- **Compose / single host:** the frontend image can serve HTTPS itself on `:8443` when `TLS_CERT_FILE` and `TLS_KEY_FILE` point at
+  mounted PEM files (unset: HTTP only, unchanged). `docker-compose.tls.yml` wires this up:
+  put `fullchain.pem` and `privkey.pem` in `./certs` (or `make tls-selfsigned` for a local self-signed pair), then
+  `make up-image-tls` and open https://localhost:8443 (`RAG_TLS_PORT`). Plain HTTP stays on `RAG_UI_PORT`; there is no
+  automatic redirect, and the API on `:8000` is still HTTP (use the dashboard's `/api/` path, or put a TLS proxy in front).
+  If the key or certificate is unreadable the container refuses to start rather than silently falling back to HTTP.
+
 Things you must provide: real values in `k8s/base/secrets.yaml` (including a random `SECRET_KEY` of 32+ characters — the API refuses to start in prod with a placeholder — and the bootstrap `ADMIN_*`) (use sealed-secrets/SOPS), image
 tags in the overlay, an ingress host/class, and, when running more than one API/worker replica, either a **ReadWriteMany** storage class for the uploads
 volume (the API writes files the workers read) or `STORAGE_BACKEND=s3` via `k8s/components/s3`. A ReadWriteOnce volume

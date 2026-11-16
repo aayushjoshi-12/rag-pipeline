@@ -7,6 +7,7 @@ breaking changes (they will be listed under "Changed" or "Removed").
 ## [Unreleased]
 
 ### Added
+- Optional HTTPS: the `prod` and `headless` Ingresses terminate TLS (cert-manager annotation, HTTP-to-HTTPS redirect), and the frontend image serves `:8443` when `TLS_CERT_FILE` / `TLS_KEY_FILE` are set (`docker-compose.tls.yml`, `make up-image-tls`, `make tls-selfsigned`). See `docs/deployment.md`.
 - Release automation: `.github/workflows/release.yml` builds multi-arch (amd64 + arm64) backend and frontend images on a
   `vX.Y.Z` tag, scans them with Trivy, publishes them to GHCR with provenance, SBOM and a signed attestation, and creates
   the GitHub Release.
