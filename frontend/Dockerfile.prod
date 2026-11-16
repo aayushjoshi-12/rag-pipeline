@@ -16,5 +16,7 @@ USER nginx
 # API_UPSTREAM is substituted into the template at container start (nginx image feature).
 ENV API_UPSTREAM=http://rag-pipeline-api:8000
 COPY nginx.conf.template /etc/nginx/templates/default.conf.template
+# Optional HTTPS: only active when TLS_CERT_FILE / TLS_KEY_FILE are set (listens on 8443 in addition to 8080).
+COPY --chmod=755 30-enable-tls.sh /docker-entrypoint.d/30-enable-tls.sh
 COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 8080
+EXPOSE 8080 8443

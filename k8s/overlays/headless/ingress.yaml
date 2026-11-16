@@ -5,7 +5,13 @@ metadata:
   namespace: rag-pipeline
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: 30m
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"   # HTTP -> HTTPS
+    cert-manager.io/cluster-issuer: letsencrypt-prod   # replace with your ClusterIssuer; delete if you supply the Secret yourself
 spec:
+  tls:
+    - hosts:
+        - api.example.com   # replace (same host as below)
+      secretName: rag-pipeline-tls   # created by cert-manager, or your own kubernetes.io/tls Secret
   # ingressClassName: nginx   # REQUIRED on most clusters (kind's ingress-nginx class is not the default)
   rules:
     - host: api.example.com   # replace

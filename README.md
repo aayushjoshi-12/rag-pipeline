@@ -152,6 +152,7 @@ Measured on one laptop (Apple M4) with real Fannie Mae Selling Guide chapters; m
 |---|---|---|
 | Docker Compose, from source | `make up` | [deployment.md](docs/deployment.md) |
 | Docker Compose, published images | `docker compose -f docker-compose.image.yml up -d` | [deployment.md](docs/deployment.md#run-the-published-images) |
+| HTTPS (Ingress TLS, or the frontend image on :8443) | `make up-image-tls` (certs in `./certs`) | [deployment.md](docs/deployment.md#https) |
 | Kubernetes (Kustomize overlays `dev`, `prod`, `kind`) | `make deploy ENV=dev` (render only: `make deploy-dry ENV=prod`) | [deployment.md](docs/deployment.md#kubernetes-overview), [kubernetes-local.md](docs/kubernetes-local.md) |
 | Headless (API only, no dashboard) | `k8s/overlays/headless`, or `make up-api` on Compose | [api.md](docs/api.md#headless-deployment-api-only) |
 

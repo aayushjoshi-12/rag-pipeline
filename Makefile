@@ -135,6 +135,17 @@ up-image:
 down-image:
 	docker compose -f docker-compose.image.yml down
 
+# Self-signed cert for trying HTTPS locally (./certs, gitignored). Use a real cert for anything else.
+tls-selfsigned:
+	mkdir -p certs
+	openssl req -x509 -newkey rsa:2048 -nodes -days 365 -subj "/CN=localhost" \
+	  -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+	  -keyout certs/privkey.pem -out certs/fullchain.pem
+	chmod 644 certs/privkey.pem   # the container's nginx user must be able to read it; local use only
+
+up-image-tls:
+	docker compose -f docker-compose.image.yml -f docker-compose.tls.yml up -d
+
 logs:
 	docker compose logs -f api worker
 
