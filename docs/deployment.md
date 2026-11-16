@@ -16,7 +16,7 @@ Two images are published to the GitHub Container Registry by `.github/workflows/
 | Image | Contents |
 |---|---|
 | `ghcr.io/aayushjoshi-12/rag-pipeline-backend` | API, Celery worker, Celery beat and the Alembic migration: one image, the command differs (`uvicorn`, `celery ... worker`, `celery ... beat`, `alembic upgrade head`). Runs as UID 10001. |
-| `ghcr.io/aayushjoshi-12/rag-pipeline-frontend` | The dashboard: static build served by nginx, `/api/` proxied to `API_UPSTREAM`. Built on `nginxinc/nginx-unprivileged`: nginx runs as a non-root user and listens on container port 8080 (the Kubernetes Service still exposes port 80). |
+| `ghcr.io/aayushjoshi-12/rag-pipeline-frontend` | The dashboard: static build served by nginx, `/api/` proxied to `API_UPSTREAM`. Built on `nginxinc/nginx-unprivileged`: nginx runs as a non-root user and listens on container port 8080 (the Kubernetes Service still exposes port 80). Optional HTTPS on 8443: see [HTTPS](#https). |
 
 Platforms: `linux/amd64` and `linux/arm64` (one multi-arch tag; Docker pulls the right one).
 
@@ -112,6 +112,29 @@ built images and the host's Ollama; the Ingress needs your cluster's `ingressCla
   `make up-image-tls` and open https://localhost:8443 (`RAG_TLS_PORT`). Plain HTTP stays on `RAG_UI_PORT`; there is no
   automatic redirect, and the API on `:8000` is still HTTP (use the dashboard's `/api/` path, or put a TLS proxy in front).
   If the key or certificate is unreadable the container refuses to start rather than silently falling back to HTTP.
+
+### Adding the certificates
+
+**Compose (published images)**
+
+1. Get a certificate and key as PEM files: from your CA / Let's Encrypt (`fullchain.pem` = certificate plus intermediates, `privkey.pem`),
+   or for a local try-out `make tls-selfsigned` (browsers will warn; add `-k` to curl).
+2. Put them in `./certs/fullchain.pem` and `./certs/privkey.pem` (the directory is gitignored). To use other names or paths, edit
+   `TLS_CERT_FILE` / `TLS_KEY_FILE` and the volume in `docker-compose.tls.yml`.
+3. The container's nginx user (UID 101) must be able to read both files (`chmod 644`, or `chown` to 101), otherwise the container exits
+   with "must both be set and readable".
+4. `make up-image-tls` (or `docker compose -f docker-compose.image.yml -f docker-compose.tls.yml up -d`), then open https://localhost:8443.
+5. Renewal: replace the files and `docker compose ... restart frontend` (nginx reads them at start).
+
+Without Compose, run the image yourself: `docker run -v /path/certs:/certs:ro -e TLS_CERT_FILE=/certs/fullchain.pem -e TLS_KEY_FILE=/certs/privkey.pem -p 8443:8443 ...`.
+
+**Kubernetes**
+
+- With cert-manager: install it, create a `ClusterIssuer`, put its name in the Ingress annotation; the certificate lands in the
+  `rag-pipeline-tls` Secret and renews itself.
+- Without cert-manager: delete the annotation and create the Secret yourself with
+  `kubectl -n rag-pipeline create secret tls rag-pipeline-tls --cert=fullchain.pem --key=privkey.pem` (keep it out of git; use sealed-secrets/SOPS
+  if it is managed declaratively).
 
 Things you must provide: real values in `k8s/base/secrets.yaml` (including a random `SECRET_KEY` of 32+ characters — the API refuses to start in prod with a placeholder — and the bootstrap `ADMIN_*`) (use sealed-secrets/SOPS), image
 tags in the overlay, an ingress host/class, and, when running more than one API/worker replica, either a **ReadWriteMany** storage class for the uploads
