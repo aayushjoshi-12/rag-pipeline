@@ -7,7 +7,6 @@ breaking changes (they will be listed under "Changed" or "Removed").
 ## [Unreleased]
 
 ### Added
-- Optional HTTPS: the `prod` and `headless` Ingresses terminate TLS (cert-manager annotation, HTTP-to-HTTPS redirect), and the frontend image serves `:8443` when `TLS_CERT_FILE` / `TLS_KEY_FILE` are set (`docker-compose.tls.yml`, `make up-image-tls`, `make tls-selfsigned`). See `docs/deployment.md`.
 - Release automation: `.github/workflows/release.yml` builds multi-arch (amd64 + arm64) backend and frontend images on a
   `vX.Y.Z` tag, scans them with Trivy, publishes them to GHCR with provenance, SBOM and a signed attestation, and creates
   the GitHub Release.
@@ -31,12 +30,13 @@ breaking changes (they will be listed under "Changed" or "Removed").
 - `ci.yml` is callable from other workflows and its third-party actions are pinned to commit SHAs.
 - `.dockerignore` files also exclude `.env*`, `.git`, `data`, `tmp`, `__pycache__`, `.DS_Store` from build contexts.
 
-## [0.1.0] - Unreleased (first tagged release)
+## [0.1.0] - 2026-11-16 (first tagged release)
 
 First public version. What is in it, as exercised by the project's own tests and smoke runs (see the status table in the
 README for what was verified end to end and what was not):
 
 ### Added
+- Optional HTTPS: the `prod` and `headless` Ingresses terminate TLS (cert-manager annotation, HTTP-to-HTTPS redirect), and the frontend image serves `:8443` when `TLS_CERT_FILE` / `TLS_KEY_FILE` are set (`docker-compose.tls.yml`, `make up-image-tls`, `make tls-selfsigned`). See `docs/deployment.md`.
 - **Ingestion**: upload pdf, docx, txt, md (`POST /v1/documents`) or ingest from an http(s) or `s3://` link; Celery workers
   parse, chunk, embed and index, with pollable job status. Local-disk or S3-compatible file storage.
 - **Parsing**: PDF text layer first, OCR (Tesseract) or a vision LLM (OpenRouter, OpenAI, Anthropic) for scanned pages;
